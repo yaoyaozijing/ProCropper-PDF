@@ -25,11 +25,14 @@ class PdfEditorPage extends StatefulWidget {
 class _PdfEditorPageState extends State<PdfEditorPage> {
   final Set<int> _selectedClusterIndices = <int>{};
   final CropViewportController _viewportController = CropViewportController();
+  final TextEditingController _locatePageController = TextEditingController();
+  final FocusNode _locatePageFocusNode = FocusNode();
   static const double _clusterPanelWidth = 350;
   static const double _toolPanelWidth = 188;
   String? _statusMessage;
   bool _showClusterPanel = true;
   bool _showToolPanel = true;
+  bool _showLocatePageField = false;
 
   PdfEditorController get _controller => widget.controller;
 
@@ -42,6 +45,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   @override
   void dispose() {
     _controller.removeListener(_onControllerChanged);
+    _locatePageController.dispose();
+    _locatePageFocusNode.dispose();
     super.dispose();
   }
 
@@ -249,19 +254,53 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       decoration: BoxDecoration(
         border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Text(
-              '共 ${project.pageCount} 页， ${project.clusters.length} 个分组',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          if (_showLocatePageField) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _locatePageController,
+                    focusNode: _locatePageFocusNode,
+                    autofocus: false,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _locatePageFromField(),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: '输入页码定位分组',
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: '确认定位',
+                  onPressed: _locatePageFromField,
+                  icon: const Icon(Icons.check_rounded),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(width: 12),
-          FilledButton.tonalIcon(
-            onPressed: _showLocatePageDialog,
-            icon: const Icon(Icons.search_rounded),
-            label: const Text('定位'),
+            const SizedBox(height: 10),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '共 ${project.pageCount} 页， ${project.clusters.length} 个分组',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.tonalIcon(
+                onPressed: _showLocatePageField ? _hideLocatePageField : _showLocatePageFieldInput,
+                icon: Icon(_showLocatePageField ? Icons.keyboard_hide_rounded : Icons.search_rounded),
+                label: Text(_showLocatePageField ? '收起' : '定位'),
+              ),
+            ],
           ),
         ],
       ),
@@ -783,73 +822,54 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     pageTextController.dispose();
   }
 
-  Future<void> _showLocatePageDialog() async {
+  void _showLocatePageFieldInput() {
+    if (_showLocatePageField) {
+      return;
+    }
+    setState(() {
+      _showLocatePageField = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _locatePageFocusNode.requestFocus();
+      _locatePageController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _locatePageController.text.length,
+      );
+    });
+  }
+
+  void _hideLocatePageField() {
+    _locatePageFocusNode.unfocus();
+    setState(() {
+      _showLocatePageField = false;
+    });
+  }
+
+  void _locatePageFromField() {
     final project = _controller.project;
     if (project == null) {
       return;
     }
-
-    final pageTextController = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('定位页面所在分组'),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('输入页码后，将自动定位到包含该页的分组。'),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: pageTextController,
-                  autofocus: true,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    hintText: '例如：12',
-                    border: const OutlineInputBorder(),
-                    helperText: '总页数：${project.pageCount} 页',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('定位'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed == true) {
-      try {
-        final page = int.parse(pageTextController.text.trim());
-        if (page < 1 || page > project.pageCount) {
-          throw FormatException('页码超出范围，请输入 1 到 ${project.pageCount} 之间的数字。');
-        }
-        final clusterIndex = _controller.clusters.indexWhere((cluster) => cluster.pages.contains(page));
-        if (clusterIndex == -1) {
-          throw const FormatException('没有在任何分组中找到该页。');
-        }
-        _controller.selectCluster(clusterIndex);
-      } catch (error) {
-        if (!mounted) {
-          return;
-        }
-        _showMessage('查找页面失败：$error');
+    try {
+      final page = int.parse(_locatePageController.text.trim());
+      if (page < 1 || page > project.pageCount) {
+        throw FormatException('页码超出范围，请输入 1 到 ${project.pageCount} 之间的数字。');
       }
+      final clusterIndex = _controller.clusters.indexWhere((cluster) => cluster.pages.contains(page));
+      if (clusterIndex == -1) {
+        throw const FormatException('没有在任何分组中找到该页。');
+      }
+      _controller.selectCluster(clusterIndex);
+      _hideLocatePageField();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage('查找页面失败：$error');
     }
-
-    pageTextController.dispose();
   }
 
   void _showRectInfoDialog(int index) {

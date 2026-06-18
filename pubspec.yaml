@@ -9,6 +9,7 @@ environment:
 dependencies:
   desktop_drop: ^0.7.1
   file_picker: ^11.0.2
+  fluent_ui: ^4.15.1
   flutter:
     sdk: flutter
   flutter_localizations:

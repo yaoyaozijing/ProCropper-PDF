@@ -109,6 +109,8 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
         return 'Material Design';
       case AppStyleMode.cupertino:
         return 'Cupertino';
+      case AppStyleMode.fluent:
+        return 'Fluent UI';
     }
   }
 

@@ -9,6 +9,7 @@ enum AppThemeMode {
 enum AppStyleMode {
   material,
   cupertino,
+  fluent,
 }
 
 enum AppAccentMode {
