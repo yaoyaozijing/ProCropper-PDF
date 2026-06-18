@@ -346,18 +346,6 @@ class _CropEditorState extends State<CropEditor> {
           right: rect.right + dx,
           bottom: rect.bottom + dy,
         ).normalized();
-        final width = rect.width;
-        final height = rect.height;
-        rect = CropRect(
-          left: rect.left.clamp(0.0, 1.0 - width),
-          top: rect.top.clamp(0.0, 1.0 - height),
-          right: 0,
-          bottom: 0,
-        );
-        rect = rect.copyWith(
-          right: rect.left + width,
-          bottom: rect.top + height,
-        );
       case _DragHandle.top:
         rect = rect.copyWith(top: rect.top + dy);
       case _DragHandle.right:

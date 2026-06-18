@@ -8,6 +8,8 @@ class PageCluster {
   PageCluster({
     required this.id,
     required this.parityLabel,
+    required this.layoutLabel,
+    required this.groupingReason,
     required this.pageWidth,
     required this.pageHeight,
     required this.pages,
@@ -17,10 +19,13 @@ class PageCluster {
     required this.previewPixelWidth,
     required this.previewPixelHeight,
     required this.cropRects,
+    this.containsOutlierPage = false,
   });
 
   final String id;
   final String parityLabel;
+  final String layoutLabel;
+  final String groupingReason;
   final double pageWidth;
   final double pageHeight;
   final List<int> pages;
@@ -30,11 +35,12 @@ class PageCluster {
   final int previewPixelWidth;
   final int previewPixelHeight;
   final List<CropRect> cropRects;
+  final bool containsOutlierPage;
 
   String get title {
     final samplePages = pages.take(6).join(', ');
     final suffix = pages.length > 6 ? '...' : '';
-    return '$parityLabel页（${pages.length}页）[$samplePages$suffix]';
+    return '$parityLabel · $layoutLabel（${pages.length}页）[$samplePages$suffix]';
   }
 
   PageCluster copyWith({
@@ -44,10 +50,15 @@ class PageCluster {
     Uint8List? previewBgraBytes,
     int? previewPixelWidth,
     int? previewPixelHeight,
+    String? layoutLabel,
+    String? groupingReason,
+    bool? containsOutlierPage,
   }) {
     return PageCluster(
       id: id,
       parityLabel: parityLabel,
+      layoutLabel: layoutLabel ?? this.layoutLabel,
+      groupingReason: groupingReason ?? this.groupingReason,
       pageWidth: pageWidth,
       pageHeight: pageHeight,
       pages: pages,
@@ -57,6 +68,7 @@ class PageCluster {
       previewPixelWidth: previewPixelWidth ?? this.previewPixelWidth,
       previewPixelHeight: previewPixelHeight ?? this.previewPixelHeight,
       cropRects: cropRects ?? this.cropRects,
+      containsOutlierPage: containsOutlierPage ?? this.containsOutlierPage,
     );
   }
 

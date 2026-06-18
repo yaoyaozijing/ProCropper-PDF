@@ -4,8 +4,12 @@ import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
 
+import 'models/app_grouping_settings.dart';
+import 'models/cluster_settings.dart';
 import 'models/page_cluster.dart';
+import 'services/app_settings_service.dart';
 import 'state/pdf_editor_controller.dart';
 import 'widgets/crop_editor.dart';
 import 'widgets/status_corner_card.dart';
@@ -27,6 +31,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   final CropViewportController _viewportController = CropViewportController();
   final TextEditingController _locatePageController = TextEditingController();
   final FocusNode _locatePageFocusNode = FocusNode();
+  late final AppSettingsService _appSettingsService;
   static const double _clusterPanelWidth = 350;
   static const double _toolPanelWidth = 188;
   String? _statusMessage;
@@ -39,7 +44,9 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   @override
   void initState() {
     super.initState();
+    _appSettingsService = AppSettingsService();
     _controller.addListener(_onControllerChanged);
+    _loadDocumentSettings();
   }
 
   @override
@@ -57,6 +64,14 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  Future<void> _loadDocumentSettings() async {
+    await _appSettingsService.init();
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   @override
@@ -248,6 +263,11 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
 
   Widget _buildSidebarFooter() {
     final project = _controller.project!;
+    final excludedPages = _controller.settings.excludedPages.toList()..sort();
+    final edgeFilterText = _formatEdgeFilterSummary(_controller.settings.edgeFilter);
+    final summaryText = excludedPages.isEmpty
+        ? '共 ${project.pageCount} 页，${project.clusters.length} 个分组，排除无，过滤 $edgeFilterText'
+        : '共 ${project.pageCount} 页，${project.clusters.length} 个分组，排除第 ${_formatPageRanges(excludedPages)} 页，过滤 $edgeFilterText';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -287,15 +307,15 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
             const SizedBox(height: 10),
           ],
           Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '共 ${project.pageCount} 页， ${project.clusters.length} 个分组',
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-              ),
-              const SizedBox(width: 12),
-              FilledButton.tonalIcon(
+        children: [
+          Expanded(
+            child: Text(
+              summaryText,
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.tonalIcon(
                 onPressed: _showLocatePageField ? _hideLocatePageField : _showLocatePageFieldInput,
                 icon: Icon(_showLocatePageField ? Icons.keyboard_hide_rounded : Icons.search_rounded),
                 label: Text(_showLocatePageField ? '收起' : '定位'),
@@ -634,13 +654,31 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   Future<void> _exportPdf() async {
     try {
       if (Platform.isAndroid) {
-        final destinationUri = await _controller.createAndroidDocumentUri(
-          fileName: _suggestedOutputFileName(),
-        );
-        if (destinationUri == null) {
+        await _appSettingsService.init();
+        final currentSettings = _appSettingsService.loadGroupingSettings();
+        final exportMode = currentSettings.androidExportMode;
+        if (exportMode == AndroidExportMode.askEveryTime) {
+          final exportDecision = await _showAndroidExportActionDialog();
+          if (exportDecision == null) {
+            return;
+          }
+          if (exportDecision.doNotAskAgain) {
+            final nextSettings = currentSettings.copyWith(
+              androidExportMode: switch (exportDecision.action) {
+                _AndroidExportAction.save => AndroidExportMode.save,
+                _AndroidExportAction.share => AndroidExportMode.share,
+              },
+            );
+            await _appSettingsService.saveGroupingSettings(nextSettings);
+          }
+          await _performAndroidExport(exportDecision.action);
           return;
         }
-        await _controller.export(destinationUri: destinationUri);
+        await _performAndroidExport(
+          exportMode == AndroidExportMode.save
+              ? _AndroidExportAction.save
+              : _AndroidExportAction.share,
+        );
       } else {
         final destinationPath = await _resolveExportDestinationPath();
         if (destinationPath == null) {
@@ -656,6 +694,96 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     }
   }
 
+  Future<_AndroidExportDecision?> _showAndroidExportActionDialog() {
+    return showDialog<_AndroidExportDecision>(
+      context: context,
+      builder: (context) {
+        var doNotAskAgain = false;
+        return AlertDialog(
+          title: const Text('导出 PDF'),
+          content: StatefulBuilder(
+            builder: (context, setState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('请选择导出方式。保存会写入你选择的位置，分享会先导出再打开系统分享窗口。'),
+                  const SizedBox(height: 14),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: doNotAskAgain,
+                    onChanged: (value) {
+                      setState(() {
+                        doNotAskAgain = value ?? false;
+                      });
+                    },
+                    title: const Text('请勿询问'),
+                    subtitle: const Text('之后默认使用本次选择的导出方式。'),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton.tonal(
+              onPressed: () {
+                Navigator.of(context).pop(
+                  _AndroidExportDecision(
+                    action: _AndroidExportAction.share,
+                    doNotAskAgain: doNotAskAgain,
+                  ),
+                );
+              },
+              child: const Text('分享'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop(
+                  _AndroidExportDecision(
+                    action: _AndroidExportAction.save,
+                    doNotAskAgain: doNotAskAgain,
+                  ),
+                );
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _performAndroidExport(_AndroidExportAction action) async {
+    if (action == _AndroidExportAction.save) {
+      final destinationUri = await _controller.createAndroidDocumentUri(
+        fileName: _suggestedOutputFileName(),
+      );
+      if (destinationUri == null) {
+        return;
+      }
+      await _controller.export(destinationUri: destinationUri);
+      return;
+    }
+
+    final outputPath = await _controller.export();
+    if (outputPath == null) {
+      return;
+    }
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(outputPath, mimeType: 'application/pdf')],
+        text: _suggestedOutputFileName(),
+      ),
+    );
+    _controller.dismissExportFeedback();
+    _showMessage('分享窗口已打开。');
+  }
+
   Future<String?> _resolveExportDestinationPath() async {
     final result = await FilePicker.saveFile(
       dialogTitle: '保存裁边后的 PDF',
@@ -669,9 +797,44 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   Future<void> _showRegroupDialog() async {
     final currentSettings = _controller.settings;
     final oddEven = ValueNotifier<bool>(currentSettings.separateOddEven);
-    final excludedText = TextEditingController(
-      text: _formatExcludedPages(currentSettings.excludedPages),
+    final smartGroupingLevel = ValueNotifier<SmartGroupingLevel>(
+      currentSettings.smartGroupingLevel,
     );
+    final leftFilterController = TextEditingController(
+      text: _formatPercentValue(currentSettings.edgeFilter.left),
+    );
+    final topFilterController = TextEditingController(
+      text: _formatPercentValue(currentSettings.edgeFilter.top),
+    );
+    final rightFilterController = TextEditingController(
+      text: _formatPercentValue(currentSettings.edgeFilter.right),
+    );
+    final bottomFilterController = TextEditingController(
+      text: _formatPercentValue(currentSettings.edgeFilter.bottom),
+    );
+    final excludedText = TextEditingController(
+      text: _formatPageRanges(currentSettings.excludedPages.toList()..sort()),
+    );
+
+    void applyEdgeFilterPreset({
+      required double left,
+      required double top,
+      required double right,
+      required double bottom,
+    }) {
+      if (left > 0) {
+        leftFilterController.text = _formatPercentValue(left);
+      }
+      if (top > 0) {
+        topFilterController.text = _formatPercentValue(top);
+      }
+      if (right > 0) {
+        rightFilterController.text = _formatPercentValue(right);
+      }
+      if (bottom > 0) {
+        bottomFilterController.text = _formatPercentValue(bottom);
+      }
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -697,6 +860,123 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   },
                 ),
                 const SizedBox(height: 10),
+                const Text('智能分组等级'),
+                const SizedBox(height: 8),
+                ValueListenableBuilder<SmartGroupingLevel>(
+                  valueListenable: smartGroupingLevel,
+                  builder: (context, value, child) {
+                    return Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: SmartGroupingLevel.values.map((level) {
+                        return ChoiceChip(
+                          label: Text(_smartGroupingLevelLabel(level)),
+                          selected: value == level,
+                          onSelected: (_) => smartGroupingLevel.value = level,
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _smartGroupingLevelDescription(smartGroupingLevel.value),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 14),
+                const Text('四边过滤百分比'),
+                const SizedBox(height: 6),
+                Text(
+                  '会先忽略页面四周对应比例的区域，再进行分组分析和自动识别。',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton(
+                      onPressed: () => applyEdgeFilterPreset(
+                        left: 0,
+                        top: 0.06,
+                        right: 0,
+                        bottom: 0.06,
+                      ),
+                      child: const Text('忽略页眉页脚'),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => applyEdgeFilterPreset(
+                        left: 0.10,
+                        top: 0,
+                        right: 0.10,
+                        bottom: 0,
+                      ),
+                      child: const Text('忽略侧边标记'),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => applyEdgeFilterPreset(
+                        left: 0.04,
+                        top: 0.05,
+                        right: 0.04,
+                        bottom: 0.05,
+                      ),
+                      child: const Text('温和过滤'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: leftFilterController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: '左 %',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: topFilterController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: '上 %',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: rightFilterController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: '右 %',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: bottomFilterController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: '下 %',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
                 const Text('排除页码'),
                 const SizedBox(height: 6),
                 TextField(
@@ -733,6 +1013,13 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         await _controller.regroup(
           separateOddEven: oddEven.value,
           excludedPages: _parsePageSelection(excludedText.text),
+          smartGroupingLevel: smartGroupingLevel.value,
+          edgeFilter: EdgeFilterSettings(
+            left: _parsePercentValue(leftFilterController.text),
+            top: _parsePercentValue(topFilterController.text),
+            right: _parsePercentValue(rightFilterController.text),
+            bottom: _parsePercentValue(bottomFilterController.text),
+          ),
         );
         _selectedClusterIndices.clear();
       } catch (error) {
@@ -965,11 +1252,6 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     return result;
   }
 
-  String _formatExcludedPages(Set<int> pages) {
-    final sorted = pages.toList()..sort();
-    return sorted.join(', ');
-  }
-
   String _formatPageRanges(List<int> pages) {
     if (pages.isEmpty) {
       return '';
@@ -993,6 +1275,46 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
 
     parts.add(start == end ? '$start' : '$start-$end');
     return parts.join(', ');
+  }
+
+  String _smartGroupingLevelLabel(SmartGroupingLevel level) {
+    switch (level) {
+      case SmartGroupingLevel.basic:
+        return '基础';
+      case SmartGroupingLevel.balanced:
+        return '智能';
+      case SmartGroupingLevel.strict:
+        return '严格';
+    }
+  }
+
+  String _smartGroupingLevelDescription(SmartGroupingLevel level) {
+    switch (level) {
+      case SmartGroupingLevel.basic:
+        return '仅按页面尺寸和奇偶页分组，速度最快。';
+      case SmartGroupingLevel.balanced:
+        return '按尺寸粗分后，再结合页面版式指纹细分，适合大多数文档。';
+      case SmartGroupingLevel.strict:
+        return '更敏感地拆分不同版式页面，裁边更稳，但分组会更多。';
+    }
+  }
+
+  String _formatPercentValue(double value) {
+    final percent = value * 100;
+    final rounded = percent.roundToDouble();
+    return rounded == percent ? rounded.toStringAsFixed(0) : percent.toStringAsFixed(1);
+  }
+
+  double _parsePercentValue(String text) {
+    final value = double.tryParse(text.trim());
+    if (value == null) {
+      throw FormatException('过滤百分比格式不正确：$text');
+    }
+    return (value / 100).clamp(0.0, 45.0 / 100).toDouble();
+  }
+
+  String _formatEdgeFilterSummary(EdgeFilterSettings settings) {
+    return '左${_formatPercentValue(settings.left)} 上${_formatPercentValue(settings.top)} 右${_formatPercentValue(settings.right)} 下${_formatPercentValue(settings.bottom)}';
   }
 
   String _suggestedOutputFileName() {
@@ -1066,6 +1388,21 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   }
 }
 
+enum _AndroidExportAction {
+  save,
+  share,
+}
+
+class _AndroidExportDecision {
+  const _AndroidExportDecision({
+    required this.action,
+    required this.doNotAskAgain,
+  });
+
+  final _AndroidExportAction action;
+  final bool doNotAskAgain;
+}
+
 class _ClusterTile extends StatelessWidget {
   const _ClusterTile({
     required this.cluster,
@@ -1121,11 +1458,29 @@ class _ClusterTile extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          cluster.parityLabel,
-                          style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w700),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _ClusterBadge(
+                              label: cluster.parityLabel,
+                              selected: selected,
+                              emphasized: false,
+                            ),
+                            _ClusterBadge(
+                              label: cluster.layoutLabel,
+                              selected: selected,
+                              emphasized: true,
+                            ),
+                            if (cluster.containsOutlierPage)
+                              _ClusterBadge(
+                                label: '离群页',
+                                selected: selected,
+                                emphasized: false,
+                              ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
                         Text(
                           '共 ${cluster.pages.length} 页',
                           style: const TextStyle(fontWeight: FontWeight.w600),
@@ -1167,6 +1522,45 @@ class _ClusterTile extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ClusterBadge extends StatelessWidget {
+  const _ClusterBadge({
+    required this.label,
+    required this.selected,
+    required this.emphasized,
+  });
+
+  final String label;
+  final bool selected;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final backgroundColor = emphasized
+        ? colorScheme.primary.withValues(alpha: selected ? 0.18 : 0.12)
+        : colorScheme.surfaceContainerHighest.withValues(alpha: selected ? 0.62 : 0.82);
+    final foregroundColor = emphasized
+        ? colorScheme.primary
+        : colorScheme.onSurfaceVariant;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: foregroundColor,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

@@ -54,16 +54,20 @@ class BrissFlutterApp extends StatelessWidget {
       brightness: brightness,
     );
     final isOled = settings.oledOptimized && brightness == Brightness.dark;
+    final tintedSurface = Color.alphaBlend(
+      colorScheme.primary.withValues(alpha: 0.05),
+      colorScheme.surface,
+    );
+    final tintedCardSurface = Color.alphaBlend(
+      colorScheme.primary.withValues(alpha: 0.03),
+      colorScheme.surfaceContainerLow,
+    );
     final scaffoldColor = isOled
         ? Colors.black
-        : brightness == Brightness.light
-            ? const Color(0xFFF5F1E8)
-            : Color.alphaBlend(colorScheme.primary.withValues(alpha: 0.05), colorScheme.surface);
+        : tintedSurface;
     final cardColor = isOled
         ? const Color(0xFF050505)
-        : brightness == Brightness.light
-            ? const Color(0xFFFFFCF6)
-            : colorScheme.surfaceContainerLow;
+        : tintedCardSurface;
 
     return ThemeData(
       colorScheme: colorScheme,

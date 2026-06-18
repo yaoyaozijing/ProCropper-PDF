@@ -2,11 +2,14 @@ import 'package:hive/hive.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/app_grouping_settings.dart';
+import '../models/cluster_settings.dart';
 import '../models/app_theme_settings.dart';
 
 class AppSettingsService {
   static const String _boxName = 'app_settings';
   static const String _themeSettingsKey = 'theme_settings';
+  static const String _groupingSettingsKey = 'grouping_settings';
 
   Box<dynamic>? _box;
 
@@ -62,6 +65,35 @@ class AppSettingsService {
       'styleMode': settings.styleMode.index,
       'accentMode': settings.accentMode.index,
       'oledOptimized': settings.oledOptimized,
+    });
+  }
+
+  AppGroupingSettings loadGroupingSettings() {
+    final raw = _box?.get(_groupingSettingsKey);
+    if (raw is! Map) {
+      return const AppGroupingSettings();
+    }
+
+    final smartGroupingLevelIndex = raw['defaultSmartGroupingLevel'] as int?;
+    final androidExportModeIndex = raw['androidExportMode'] as int?;
+    return AppGroupingSettings(
+      defaultSmartGroupingLevel: smartGroupingLevelIndex != null &&
+              smartGroupingLevelIndex >= 0 &&
+              smartGroupingLevelIndex < SmartGroupingLevel.values.length
+          ? SmartGroupingLevel.values[smartGroupingLevelIndex]
+          : SmartGroupingLevel.balanced,
+      androidExportMode: androidExportModeIndex != null &&
+              androidExportModeIndex >= 0 &&
+              androidExportModeIndex < AndroidExportMode.values.length
+          ? AndroidExportMode.values[androidExportModeIndex]
+          : AndroidExportMode.askEveryTime,
+    );
+  }
+
+  Future<void> saveGroupingSettings(AppGroupingSettings settings) async {
+    await _box?.put(_groupingSettingsKey, <String, Object>{
+      'defaultSmartGroupingLevel': settings.defaultSmartGroupingLevel.index,
+      'androidExportMode': settings.androidExportMode.index,
     });
   }
 }

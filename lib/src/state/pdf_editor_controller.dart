@@ -55,13 +55,19 @@ class PdfEditorController extends ChangeNotifier {
   PageCluster? get selectedCluster =>
       clusters.isEmpty ? null : clusters[_selectedClusterIndex.clamp(0, clusters.length - 1)];
 
-  Future<void> openFile(String filePath) async {
+  Future<void> openFile(
+    String filePath, {
+    ClusterSettings initialSettings = const ClusterSettings(),
+  }) async {
     await _runBusy('正在加载 PDF...', () async {
       final previousProject = _project;
       _project = null;
       notifyListeners();
       await previousProject?.dispose();
-      _project = await _projectService.open(filePath);
+      _project = await _projectService.open(
+        filePath,
+        settings: initialSettings,
+      );
       _selectedClusterIndex = 0;
       _selectedRectIndex = 0;
     });
@@ -172,11 +178,16 @@ class PdfEditorController extends ChangeNotifier {
 
   Future<void> recalculateAutoCropForSelectedCluster() async {
     final cluster = selectedCluster;
-    if (cluster == null) {
+    final project = _project;
+    if (cluster == null || project == null) {
       return;
     }
     await _runBusy('正在重新计算当前分组的自动裁边...', () async {
-      final rebuilt = await _projectService.rebuildAutoCropForCluster(cluster);
+      final rebuilt = await _projectService.rebuildAutoCropForCluster(
+        project.document,
+        cluster,
+        project.settings.edgeFilter,
+      );
       _replaceCluster(rebuilt);
       _selectedRectIndex = 0;
     });
@@ -189,7 +200,13 @@ class PdfEditorController extends ChangeNotifier {
     await _runBusy('正在重新计算全部分组的自动裁边...', () async {
       final rebuiltClusters = <PageCluster>[];
       for (final cluster in clusters) {
-        rebuiltClusters.add(await _projectService.rebuildAutoCropForCluster(cluster));
+        rebuiltClusters.add(
+          await _projectService.rebuildAutoCropForCluster(
+            _project!.document,
+            cluster,
+            _project!.settings.edgeFilter,
+          ),
+        );
       }
       _project = PdfProject(
         filePath: _project!.filePath,
@@ -239,6 +256,8 @@ class PdfEditorController extends ChangeNotifier {
   Future<void> regroup({
     required bool separateOddEven,
     required Set<int> excludedPages,
+    required SmartGroupingLevel smartGroupingLevel,
+    required EdgeFilterSettings edgeFilter,
   }) async {
     if (_project == null) {
       return;
@@ -248,6 +267,8 @@ class PdfEditorController extends ChangeNotifier {
       final nextSettings = ClusterSettings(
         separateOddEven: separateOddEven,
         excludedPages: {...excludedPages},
+        smartGroupingLevel: smartGroupingLevel,
+        edgeFilter: edgeFilter,
       );
       _project = await _projectService.rebuildProject(
         _project!,

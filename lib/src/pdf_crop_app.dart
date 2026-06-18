@@ -2,7 +2,10 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'models/app_grouping_settings.dart';
+import 'models/cluster_settings.dart';
 import 'pdf_editor_page.dart';
+import 'services/app_settings_service.dart';
 import 'settings_page.dart';
 import 'state/pdf_editor_controller.dart';
 import 'state/theme_controller.dart';
@@ -22,14 +25,18 @@ class PdfCropApp extends StatefulWidget {
 
 class _PdfCropAppState extends State<PdfCropApp> {
   late final PdfEditorController _controller;
+  late final AppSettingsService _appSettingsService;
   bool _draggingPdf = false;
   String? _statusMessage;
+  AppGroupingSettings _groupingSettings = const AppGroupingSettings();
 
   @override
   void initState() {
     super.initState();
     _controller = PdfEditorController();
+    _appSettingsService = AppSettingsService();
     _controller.addListener(_onControllerChanged);
+    _loadGroupingSettings();
   }
 
   @override
@@ -43,6 +50,17 @@ class _PdfCropAppState extends State<PdfCropApp> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  Future<void> _loadGroupingSettings() async {
+    await _appSettingsService.init();
+    final settings = _appSettingsService.loadGroupingSettings();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _groupingSettings = settings;
+    });
   }
 
   @override
@@ -210,7 +228,12 @@ class _PdfCropAppState extends State<PdfCropApp> {
   }
 
   Future<void> _openPdfAndNavigate(String path) async {
-    await _controller.openFile(path);
+    await _controller.openFile(
+      path,
+      initialSettings: ClusterSettings(
+        smartGroupingLevel: _groupingSettings.defaultSmartGroupingLevel,
+      ),
+    );
     if (!mounted || _controller.project == null) {
       return;
     }
@@ -234,6 +257,7 @@ class _PdfCropAppState extends State<PdfCropApp> {
         ),
       ),
     );
+    await _loadGroupingSettings();
   }
 
   void _showMessage(String message) {

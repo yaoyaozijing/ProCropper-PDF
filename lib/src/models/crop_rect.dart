@@ -48,15 +48,11 @@ class CropRect {
   }
 
   CropRect normalized() {
-    final normalizedLeft = left.clamp(0.0, 1.0);
-    final normalizedTop = top.clamp(0.0, 1.0);
-    final normalizedRight = right.clamp(0.0, 1.0);
-    final normalizedBottom = bottom.clamp(0.0, 1.0);
     return CropRect(
-      left: normalizedLeft < normalizedRight ? normalizedLeft : normalizedRight,
-      top: normalizedTop < normalizedBottom ? normalizedTop : normalizedBottom,
-      right: normalizedRight > normalizedLeft ? normalizedRight : normalizedLeft,
-      bottom: normalizedBottom > normalizedTop ? normalizedBottom : normalizedTop,
+      left: left < right ? left : right,
+      top: top < bottom ? top : bottom,
+      right: right > left ? right : left,
+      bottom: bottom > top ? bottom : top,
     );
   }
 

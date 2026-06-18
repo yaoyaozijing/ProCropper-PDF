@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+import 'dart:typed_data';
+
 import 'package:pdfrx/pdfrx.dart';
 
 import '../models/cluster_settings.dart';
@@ -5,6 +8,7 @@ import '../models/crop_rect.dart';
 import '../models/page_cluster.dart';
 import '../models/pdf_project.dart';
 import 'auto_crop_service.dart';
+import 'page_analysis_service.dart';
 import 'preview_merge_service.dart';
 
 class PdfProjectService {
@@ -32,7 +36,7 @@ class PdfProjectService {
     PdfDocument document, {
     required ClusterSettings settings,
   }) async {
-    final buckets = <String, _ClusterBucket>{};
+    final coarseBuckets = <String, _ClusterSeedBucket>{};
 
     for (final page in document.pages) {
       if (settings.excludedPages.contains(page.pageNumber)) {
@@ -49,11 +53,13 @@ class PdfProjectService {
           ? (page.pageNumber.isEven ? '偶数' : '奇数')
           : '混合';
       final key = '$parityKey-$roundedWidth-$roundedHeight';
-      final bucket = buckets.putIfAbsent(
+      final bucket = coarseBuckets.putIfAbsent(
         key,
-        () => _ClusterBucket(
+        () => _ClusterSeedBucket(
           id: key,
           parityLabel: parityLabel,
+          layoutLabel: '混合版式',
+          groupingReason: '',
           pageWidth: width,
           pageHeight: height,
         ),
@@ -61,11 +67,35 @@ class PdfProjectService {
       bucket.pages.add(page.pageNumber);
     }
 
-    final clusters = <PageCluster>[];
-    final sortedBuckets = buckets.values.toList()
+    final analyzedPages = <int, PageAnalysis>{};
+    if (settings.smartGroupingLevel != SmartGroupingLevel.basic) {
+      for (final page in document.pages) {
+        if (settings.excludedPages.contains(page.pageNumber)) {
+          continue;
+        }
+        analyzedPages[page.pageNumber] = await PageAnalysisService.analyzePage(
+          page,
+          edgeFilter: settings.edgeFilter,
+        );
+      }
+    }
+
+    final seeds = <_ClusterSeedBucket>[];
+    final sortedCoarseBuckets = coarseBuckets.values.toList()
       ..sort((a, b) => a.pages.first.compareTo(b.pages.first));
 
-    for (final bucket in sortedBuckets) {
+    for (final coarseBucket in sortedCoarseBuckets) {
+      final splitBuckets = _splitBySmartGrouping(
+        coarseBucket,
+        analyzedPages,
+        settings.smartGroupingLevel,
+      );
+      seeds.addAll(splitBuckets);
+    }
+
+    final clusters = <PageCluster>[];
+    for (var i = 0; i < seeds.length; i++) {
+      final bucket = seeds[i];
       final previewPages = _choosePreviewPages(bucket.pages);
       final preview = await PreviewMergeService.buildClusterPreview(
         document: document,
@@ -73,16 +103,19 @@ class PdfProjectService {
         pageWidth: bucket.pageWidth,
         pageHeight: bucket.pageHeight,
       );
-      final autoCrop = AutoCropService.detectFromBgraPixels(
-        pixels: preview.bgraBytes,
-        width: preview.width,
-        height: preview.height,
+      final autoCrop = _buildOverlayAutoCrop(
+        previewBgraBytes: preview.bgraBytes,
+        previewWidth: preview.width,
+        previewHeight: preview.height,
+        edgeFilter: settings.edgeFilter,
       );
 
       clusters.add(
         PageCluster(
-          id: bucket.id,
+          id: '${bucket.id}-$i',
           parityLabel: bucket.parityLabel,
+          layoutLabel: bucket.layoutLabel,
+          groupingReason: bucket.groupingReason,
           pageWidth: bucket.pageWidth,
           pageHeight: bucket.pageHeight,
           pages: List.unmodifiable(bucket.pages),
@@ -92,6 +125,7 @@ class PdfProjectService {
           previewPixelWidth: preview.width,
           previewPixelHeight: preview.height,
           cropRects: [autoCrop],
+          containsOutlierPage: bucket.containsOutlierPage,
         ),
       );
     }
@@ -114,13 +148,18 @@ class PdfProjectService {
     );
   }
 
-  Future<PageCluster> rebuildAutoCropForCluster(PageCluster cluster) async {
+  Future<PageCluster> rebuildAutoCropForCluster(
+    PdfDocument document,
+    PageCluster cluster,
+    EdgeFilterSettings edgeFilter,
+  ) async {
     final autoCrop = AutoCropService.detectFromBgraPixels(
       pixels: cluster.previewBgraBytes,
       width: cluster.previewPixelWidth,
       height: cluster.previewPixelHeight,
+      edgeFilter: edgeFilter,
     );
-    return cluster.copyWith(cropRects: [autoCrop]);
+    return cluster.copyWith(cropRects: [_clampCropToPage(autoCrop)]);
   }
 
   Future<PageCluster> createManualClusterFromPages(
@@ -139,9 +178,26 @@ class PdfProjectService {
       pageHeight: firstPage.height,
     );
 
+    final suggestedCrop = _buildOverlayAutoCrop(
+      previewBgraBytes: preview.bgraBytes,
+      previewWidth: preview.width,
+      previewHeight: preview.height,
+      edgeFilter: const EdgeFilterSettings(),
+    );
+
     return PageCluster(
       id: 'manual-${sortedPages.join("-")}-${DateTime.now().microsecondsSinceEpoch}',
       parityLabel: parityLabel,
+      layoutLabel: _manualLayoutLabel(
+        pages: sortedPages,
+        parityLabel: parityLabel,
+      ),
+      groupingReason: _buildManualGroupingReason(
+        parityLabel: parityLabel,
+        pageWidth: firstPage.width,
+        pageHeight: firstPage.height,
+        pageCount: sortedPages.length,
+      ),
       pageWidth: firstPage.width,
       pageHeight: firstPage.height,
       pages: List.unmodifiable(sortedPages),
@@ -150,15 +206,144 @@ class PdfProjectService {
       previewBgraBytes: preview.bgraBytes,
       previewPixelWidth: preview.width,
       previewPixelHeight: preview.height,
-      cropRects:
-          cropRects != null
-              ? List.of(cropRects)
-              : [AutoCropService.detectFromBgraPixels(
-                  pixels: preview.bgraBytes,
-                  width: preview.width,
-                  height: preview.height,
-                )],
+      cropRects: cropRects != null ? List.of(cropRects) : [suggestedCrop],
+      containsOutlierPage: false,
     );
+  }
+
+  List<_ClusterSeedBucket> _splitBySmartGrouping(
+    _ClusterSeedBucket bucket,
+    Map<int, PageAnalysis> analyzedPages,
+    SmartGroupingLevel level,
+  ) {
+    if (level == SmartGroupingLevel.basic || bucket.pages.length <= 1) {
+      return [
+        bucket.copyWith(
+          layoutLabel: analyzedPages[bucket.pages.first]?.layoutLabel ?? '混合版式',
+          groupingReason: _buildGroupingReason(
+            parityLabel: bucket.parityLabel,
+            layoutLabel: analyzedPages[bucket.pages.first]?.layoutLabel ?? '混合版式',
+            pageWidth: bucket.pageWidth,
+            pageHeight: bucket.pageHeight,
+            pageCount: bucket.pages.length,
+            smartGroupingApplied: false,
+            containsOutlierPage: false,
+          ),
+          containsOutlierPage: false,
+        ),
+      ];
+    }
+
+    final threshold = switch (level) {
+      SmartGroupingLevel.basic => 0.28,
+      SmartGroupingLevel.balanced => 0.2,
+      SmartGroupingLevel.strict => 0.13,
+    };
+
+    final sortedPages = [...bucket.pages]..sort();
+    final smartBuckets = <_SmartClusterBucket>[];
+
+    for (final pageNumber in sortedPages) {
+      final analysis = analyzedPages[pageNumber];
+      if (analysis == null) {
+        smartBuckets.add(
+          _SmartClusterBucket(
+            pages: [pageNumber],
+            fingerprint: null,
+          ),
+        );
+        continue;
+      }
+
+      _SmartClusterBucket? bestBucket;
+      var bestDistance = double.infinity;
+      for (final candidate in smartBuckets) {
+        if (candidate.fingerprint == null) {
+          continue;
+        }
+        final distance = analysis.fingerprint.distanceTo(candidate.fingerprint!);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestBucket = candidate;
+        }
+      }
+
+      if (bestBucket == null || bestDistance > threshold) {
+        smartBuckets.add(
+          _SmartClusterBucket(
+            pages: [pageNumber],
+            fingerprint: analysis.fingerprint,
+          ),
+        );
+        continue;
+      }
+
+      bestBucket.pages.add(pageNumber);
+      bestBucket.fingerprint = bestBucket.fingerprint!.mergeWith(
+        analysis.fingerprint,
+        bestBucket.pages.length - 1,
+      );
+    }
+
+    final resolvedBuckets = smartBuckets.map((smartBucket) {
+      final pages = [...smartBucket.pages]..sort();
+      return _ClusterSeedBucket(
+        id: '${bucket.id}-${pages.first}',
+        parityLabel: bucket.parityLabel,
+        layoutLabel: _resolveLayoutLabelForBucket(pages, analyzedPages),
+        groupingReason: _buildGroupingReason(
+          parityLabel: bucket.parityLabel,
+          layoutLabel: _resolveLayoutLabelForBucket(pages, analyzedPages),
+          pageWidth: bucket.pageWidth,
+          pageHeight: bucket.pageHeight,
+          pageCount: pages.length,
+          smartGroupingApplied: true,
+          containsOutlierPage: false,
+        ),
+        pageWidth: bucket.pageWidth,
+        pageHeight: bucket.pageHeight,
+        pages: pages,
+      );
+    }).toList()
+      ..sort((a, b) => a.pages.first.compareTo(b.pages.first));
+
+    return _splitOutlierPages(resolvedBuckets, analyzedPages);
+  }
+
+  CropRect _buildOverlayAutoCrop({
+    required Uint8List previewBgraBytes,
+    required int previewWidth,
+    required int previewHeight,
+    required EdgeFilterSettings edgeFilter,
+  }) {
+    final autoCrop = AutoCropService.detectFromBgraPixels(
+      pixels: previewBgraBytes,
+      width: previewWidth,
+      height: previewHeight,
+      edgeFilter: edgeFilter,
+    );
+    return _clampCropToPage(autoCrop);
+  }
+
+  CropRect _clampCropToPage(CropRect crop) {
+    return CropRect(
+      left: crop.left.clamp(0.0, 1.0).toDouble(),
+      top: crop.top.clamp(0.0, 1.0).toDouble(),
+      right: crop.right.clamp(0.0, 1.0).toDouble(),
+      bottom: crop.bottom.clamp(0.0, 1.0).toDouble(),
+    ).normalized();
+  }
+
+  double _median(List<double> values) {
+    if (values.isEmpty) {
+      return 0;
+    }
+    final sorted = [...values]..sort();
+    final middle = sorted.length ~/ 2;
+    if (sorted.length.isOdd) {
+      return sorted[middle];
+    }
+    return (sorted[middle - 1] + sorted[middle]) / 2;
   }
 
   List<int> _choosePreviewPages(List<int> pages) {
@@ -172,19 +357,203 @@ class PdfProjectService {
     }
     return result;
   }
+
+  List<_ClusterSeedBucket> _splitOutlierPages(
+    List<_ClusterSeedBucket> buckets,
+    Map<int, PageAnalysis> analyzedPages,
+  ) {
+    final result = <_ClusterSeedBucket>[];
+    for (final bucket in buckets) {
+      if (bucket.pages.length <= 2) {
+        result.add(bucket);
+        continue;
+      }
+
+      final analyses = bucket.pages
+          .map((page) => analyzedPages[page])
+          .whereType<PageAnalysis>()
+          .toList(growable: false);
+      if (analyses.length <= 2) {
+        result.add(bucket);
+        continue;
+      }
+
+      final reference = analyses.first.fingerprint;
+      final distances = analyses
+          .map((analysis) => analysis.fingerprint.distanceTo(reference))
+          .toList(growable: false);
+      final medianDistance = _median(distances);
+      final outlierPages = <int>[];
+      final normalPages = <int>[];
+
+      for (var i = 0; i < analyses.length; i++) {
+        if (distances[i] > math.max(0.14, medianDistance * 2.4)) {
+          outlierPages.add(analyses[i].pageNumber);
+        } else {
+          normalPages.add(analyses[i].pageNumber);
+        }
+      }
+
+      if (outlierPages.isEmpty || normalPages.isEmpty) {
+        result.add(bucket);
+        continue;
+      }
+
+      result.add(
+        bucket.copyWith(
+          pages: normalPages,
+          containsOutlierPage: false,
+          layoutLabel: _resolveLayoutLabelForBucket(normalPages, analyzedPages),
+          groupingReason: _buildGroupingReason(
+            parityLabel: bucket.parityLabel,
+            layoutLabel: _resolveLayoutLabelForBucket(normalPages, analyzedPages),
+            pageWidth: bucket.pageWidth,
+            pageHeight: bucket.pageHeight,
+            pageCount: normalPages.length,
+            smartGroupingApplied: true,
+            containsOutlierPage: false,
+          ),
+        ),
+      );
+      for (final pageNumber in outlierPages) {
+        result.add(
+          bucket.copyWith(
+            id: '${bucket.id}-outlier-$pageNumber',
+            pages: [pageNumber],
+            layoutLabel: '${analyzedPages[pageNumber]?.layoutLabel ?? '异常页'} · 离群',
+            groupingReason: _buildGroupingReason(
+              parityLabel: bucket.parityLabel,
+              layoutLabel: '${analyzedPages[pageNumber]?.layoutLabel ?? '异常页'} · 离群',
+              pageWidth: bucket.pageWidth,
+              pageHeight: bucket.pageHeight,
+              pageCount: 1,
+              smartGroupingApplied: true,
+              containsOutlierPage: true,
+            ),
+            containsOutlierPage: true,
+          ),
+        );
+      }
+    }
+    result.sort((a, b) => a.pages.first.compareTo(b.pages.first));
+    return result;
+  }
+
+  String _resolveLayoutLabelForBucket(
+    List<int> pages,
+    Map<int, PageAnalysis> analyzedPages,
+  ) {
+    final counts = <String, int>{};
+    for (final page in pages) {
+      final label = analyzedPages[page]?.layoutLabel ?? '混合版式';
+      counts.update(label, (value) => value + 1, ifAbsent: () => 1);
+    }
+    final sorted = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return sorted.isEmpty ? '混合版式' : sorted.first.key;
+  }
+
+  String _manualLayoutLabel({
+    required List<int> pages,
+    required String parityLabel,
+  }) {
+    if (pages.length == 1) {
+      return '手动单页';
+    }
+    return parityLabel == '混合' ? '手动混合组' : '手动分组';
+  }
+
+  static String _buildGroupingReason({
+    required String parityLabel,
+    required String layoutLabel,
+    required double pageWidth,
+    required double pageHeight,
+    required int pageCount,
+    required bool smartGroupingApplied,
+    required bool containsOutlierPage,
+  }) {
+    final roundedWidth = (pageWidth / _mergeVariability).floor() * _mergeVariability;
+    final roundedHeight = (pageHeight / _mergeVariability).floor() * _mergeVariability;
+    final parts = <String>[
+      '奇偶标签：$parityLabel',
+      '尺寸桶：$roundedWidth x $roundedHeight',
+      '版式标签：$layoutLabel',
+      '页数：$pageCount',
+      smartGroupingApplied ? '细分方式：版式指纹智能细分' : '细分方式：仅基础尺寸分组',
+    ];
+    if (containsOutlierPage) {
+      parts.add('特殊说明：该组由离群页自动拆出');
+    }
+    return parts.join('\n');
+  }
+
+  String _buildManualGroupingReason({
+    required String parityLabel,
+    required double pageWidth,
+    required double pageHeight,
+    required int pageCount,
+  }) {
+    final roundedWidth = (pageWidth / _mergeVariability).floor() * _mergeVariability;
+    final roundedHeight = (pageHeight / _mergeVariability).floor() * _mergeVariability;
+    return [
+      '奇偶标签：$parityLabel',
+      '尺寸桶：$roundedWidth x $roundedHeight',
+      '页数：$pageCount',
+      '细分方式：手动创建分组',
+    ].join('\n');
+  }
 }
 
-class _ClusterBucket {
-  _ClusterBucket({
+class _ClusterSeedBucket {
+  _ClusterSeedBucket({
     required this.id,
     required this.parityLabel,
+    required this.layoutLabel,
+    required this.groupingReason,
     required this.pageWidth,
     required this.pageHeight,
-  });
+    List<int>? pages,
+    this.containsOutlierPage = false,
+  }) : pages = pages ?? <int>[];
 
   final String id;
   final String parityLabel;
+  final String layoutLabel;
+  final String groupingReason;
   final double pageWidth;
   final double pageHeight;
-  final List<int> pages = [];
+  final List<int> pages;
+  final bool containsOutlierPage;
+
+  _ClusterSeedBucket copyWith({
+    String? id,
+    String? parityLabel,
+    String? layoutLabel,
+    String? groupingReason,
+    double? pageWidth,
+    double? pageHeight,
+    List<int>? pages,
+    bool? containsOutlierPage,
+  }) {
+    return _ClusterSeedBucket(
+      id: id ?? this.id,
+      parityLabel: parityLabel ?? this.parityLabel,
+      layoutLabel: layoutLabel ?? this.layoutLabel,
+      groupingReason: groupingReason ?? this.groupingReason,
+      pageWidth: pageWidth ?? this.pageWidth,
+      pageHeight: pageHeight ?? this.pageHeight,
+      pages: pages ?? this.pages,
+      containsOutlierPage: containsOutlierPage ?? this.containsOutlierPage,
+    );
+  }
+}
+
+class _SmartClusterBucket {
+  _SmartClusterBucket({
+    required this.pages,
+    required this.fingerprint,
+  });
+
+  final List<int> pages;
+  PageFingerprint? fingerprint;
 }
