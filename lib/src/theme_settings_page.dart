@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'l10n/app_localizations.dart';
 import 'models/app_theme_settings.dart';
 import 'state/theme_controller.dart';
+import 'widgets/windows_window_controls.dart';
 
 class ThemeSettingsPage extends StatefulWidget {
   const ThemeSettingsPage({
@@ -18,33 +20,55 @@ class ThemeSettingsPage extends StatefulWidget {
 class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final theme = Theme.of(context);
     final settings = widget.themeController.settings;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('外观设置'),
+        title: WindowsDragToMoveArea(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(l10n.appearanceSettings),
+          ),
+        ),
+        actions: const [
+          WindowsWindowControls(),
+          SizedBox(width: 8),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
           _SettingsSection(
-            title: '样式',
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: AppStyleMode.values.map((mode) {
-                return ChoiceChip(
-                  label: Text(_styleModeLabel(mode)),
-                  selected: settings.styleMode == mode,
-                  onSelected: (_) => widget.themeController.updateStyleMode(mode),
-                );
-              }).toList(),
+            title: l10n.language,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.languageSettingsDescription,
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: AppLanguageMode.values.map((mode) {
+                    return ChoiceChip(
+                      label: Text(_languageModeLabel(mode)),
+                      selected: settings.languageMode == mode,
+                      onSelected: (_) => widget.themeController.updateLanguageMode(mode),
+                    );
+                  }).toList(),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 18),
           _SettingsSection(
-            title: '深浅模式',
+            title: '${l10n.darkMode} / ${l10n.lightMode}',
             child: Wrap(
               spacing: 10,
               runSpacing: 10,
@@ -59,7 +83,7 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
           ),
           const SizedBox(height: 18),
           _SettingsSection(
-            title: '主题色',
+            title: l10n.themeColors,
             child: Wrap(
               spacing: 10,
               runSpacing: 10,
@@ -78,13 +102,13 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
           ),
           const SizedBox(height: 18),
           _SettingsSection(
-            title: 'OLED 优化',
+            title: l10n.oledOptimization,
             child: SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: settings.oledOptimized,
               onChanged: widget.themeController.updateOledOptimized,
-              title: const Text('启用 OLED 优化'),
-              subtitle: const Text('仅在深色主题下生效'),
+              title: Text(l10n.enableOledOptimization),
+              subtitle: Text(l10n.oledOnlyInDark),
             ),
           ),
         ],
@@ -93,43 +117,46 @@ class _ThemeSettingsPageState extends State<ThemeSettingsPage> {
   }
 
   String _themeModeLabel(AppThemeMode mode) {
+    final l10n = AppLocalizations.current;
     switch (mode) {
       case AppThemeMode.system:
-        return '跟随系统';
+        return l10n.systemMode;
       case AppThemeMode.light:
-        return '浅色';
+        return l10n.lightMode;
       case AppThemeMode.dark:
-        return '深色';
+        return l10n.darkMode;
     }
   }
 
-  String _styleModeLabel(AppStyleMode mode) {
+  String _languageModeLabel(AppLanguageMode mode) {
+    final l10n = AppLocalizations.current;
     switch (mode) {
-      case AppStyleMode.material:
-        return 'Material Design';
-      case AppStyleMode.cupertino:
-        return 'Cupertino';
-      case AppStyleMode.fluent:
-        return 'Fluent UI';
+      case AppLanguageMode.system:
+        return l10n.systemMode;
+      case AppLanguageMode.zhCn:
+        return l10n.simplifiedChinese;
+      case AppLanguageMode.en:
+        return l10n.english;
     }
   }
 
   String _accentModeLabel(AppAccentMode mode) {
+    final l10n = AppLocalizations.current;
     switch (mode) {
       case AppAccentMode.system:
-        return '跟随系统';
+        return l10n.systemMode;
       case AppAccentMode.jade:
-        return '玉石绿';
+        return l10n.jade;
       case AppAccentMode.amber:
-        return '琥珀金';
+        return l10n.amber;
       case AppAccentMode.ocean:
-        return '海湾蓝';
+        return l10n.ocean;
       case AppAccentMode.coral:
-        return '珊瑚橙';
+        return l10n.coral;
       case AppAccentMode.ruby:
-        return '石榴红';
+        return l10n.ruby;
       case AppAccentMode.graphite:
-        return '石墨灰';
+        return l10n.graphite;
     }
   }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+
 class StatusCornerCard extends StatelessWidget {
   const StatusCornerCard({
     required this.title,
@@ -22,6 +24,7 @@ class StatusCornerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final theme = Theme.of(context);
     return Positioned(
       right: right,
@@ -63,7 +66,7 @@ class StatusCornerCard extends StatelessWidget {
                   const Spacer(),
                   if (onClose != null)
                     IconButton(
-                      tooltip: '关闭',
+                      tooltip: l10n.close,
                       onPressed: onClose,
                       icon: const Icon(Icons.close_rounded),
                       visualDensity: VisualDensity.compact,

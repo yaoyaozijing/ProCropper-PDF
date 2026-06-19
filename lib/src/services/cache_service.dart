@@ -1,14 +1,30 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 class CacheService {
-  Future<int> clearTemporaryFiles() async {
+  static const String exportCacheDirectoryName = 'procropper_pdf_exports';
+
+  Future<Directory> getExportCacheDirectory() async {
     final tempDir = await getTemporaryDirectory();
-    if (!await tempDir.exists()) {
+    final exportDir = Directory(
+      p.join(tempDir.path, exportCacheDirectoryName),
+    );
+    if (!await exportDir.exists()) {
+      await exportDir.create(recursive: true);
+    }
+    return exportDir;
+  }
+
+  Future<int> clearTemporaryFiles() async {
+    final exportDir = await getExportCacheDirectory();
+    if (!await exportDir.exists()) {
       return 0;
     }
 
     var deletedCount = 0;
-    await for (final entity in tempDir.list(recursive: false, followLinks: false)) {
+    await for (final entity in exportDir.list(recursive: false, followLinks: false)) {
       try {
         await entity.delete(recursive: true);
         deletedCount++;
@@ -17,5 +33,24 @@ class CacheService {
       }
     }
     return deletedCount;
+  }
+
+  Future<void> deleteTemporaryFile(String path) async {
+    if (!await isManagedTemporaryFile(path)) {
+      return;
+    }
+    final file = File(path);
+    if (!await file.exists()) {
+      return;
+    }
+    await file.delete();
+  }
+
+  Future<bool> isManagedTemporaryFile(String path) async {
+    final exportDir = await getExportCacheDirectory();
+    final normalizedDirectory = p.normalize(exportDir.path);
+    final normalizedPath = p.normalize(path);
+    return normalizedPath == normalizedDirectory ||
+        p.isWithin(normalizedDirectory, normalizedPath);
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/crop_aspect_ratio_lock.dart';
 import '../models/crop_rect.dart';
 
 enum _DragHandle {
@@ -51,10 +52,12 @@ class CropEditor extends StatefulWidget {
     required this.previewBytes,
     required this.previewSize,
     required this.cropRects,
+    required this.aspectRatioLocks,
     required this.selectedRectIndex,
     required this.colorScheme,
     required this.onRectSelected,
     required this.onRectChanged,
+    required this.onRectDeleteRequested,
     required this.onRectInfoRequested,
     this.contentPadding = EdgeInsets.zero,
     this.viewportController,
@@ -64,10 +67,12 @@ class CropEditor extends StatefulWidget {
   final Uint8List previewBytes;
   final Size previewSize;
   final List<CropRect> cropRects;
+  final List<CropAspectRatioLock?> aspectRatioLocks;
   final int selectedRectIndex;
   final ColorScheme colorScheme;
   final ValueChanged<int> onRectSelected;
   final ValueChanged<CropRect> onRectChanged;
+  final ValueChanged<int> onRectDeleteRequested;
   final ValueChanged<int> onRectInfoRequested;
   final EdgeInsets contentPadding;
   final CropViewportController? viewportController;
@@ -147,6 +152,7 @@ class _CropEditorState extends State<CropEditor> {
             onScaleUpdate: _onScaleUpdate,
             onScaleEnd: _onScaleEnd,
             onTapUp: _onTapUp,
+            onDoubleTapDown: _onDoubleTapDown,
             onSecondaryTapUp: _onSecondaryTapUp,
             child: ClipRect(
               child: Stack(
@@ -168,6 +174,22 @@ class _CropEditorState extends State<CropEditor> {
                       ),
                     ),
                   ),
+                  ...List<Widget>.generate(widget.cropRects.length, (index) {
+                    final rect = _rectOnViewport(widget.cropRects[index], imageRect);
+                    final selected = index == widget.selectedRectIndex;
+                    return Positioned.fromRect(
+                      rect: _labelRect(rect, index),
+                      child: _RectInfoChip(
+                        index: index,
+                        selected: selected,
+                        colorScheme: widget.colorScheme,
+                        onTap: () {
+                          widget.onRectSelected(index);
+                          widget.onRectInfoRequested(index);
+                        },
+                      ),
+                    );
+                  }),
                 ],
               ),
             ),
@@ -201,6 +223,23 @@ class _CropEditorState extends State<CropEditor> {
       if (rect.contains(position)) {
         widget.onRectSelected(i);
         widget.onRectInfoRequested(i);
+        return;
+      }
+    }
+  }
+
+  void _onDoubleTapDown(TapDownDetails details) {
+    if (details.kind != PointerDeviceKind.mouse) {
+      return;
+    }
+
+    final position = details.localPosition;
+    final imageRect = _imageRectFor(_viewportSize);
+    for (var i = widget.cropRects.length - 1; i >= 0; i--) {
+      final rect = _rectOnViewport(widget.cropRects[i], imageRect);
+      if (rect.contains(position)) {
+        widget.onRectSelected(i);
+        widget.onRectDeleteRequested(i);
         return;
       }
     }
@@ -337,6 +376,7 @@ class _CropEditorState extends State<CropEditor> {
     final dx = delta.dx / imageRect.width;
     final dy = delta.dy / imageRect.height;
     var rect = _dragStartRect!;
+    final aspectRatioLock = widget.aspectRatioLocks[widget.selectedRectIndex];
 
     switch (_dragHandle!) {
       case _DragHandle.move:
@@ -364,8 +404,69 @@ class _CropEditorState extends State<CropEditor> {
         rect = rect.copyWith(right: rect.right + dx, bottom: rect.bottom + dy);
     }
 
+    rect = _applyAspectRatioLock(
+      rect: rect,
+      originalRect: _dragStartRect!,
+      handle: _dragHandle!,
+      aspectRatioLock: aspectRatioLock,
+    );
+
     if (rect.isValid) {
       widget.onRectChanged(rect.normalized());
+    }
+  }
+
+  CropRect _applyAspectRatioLock({
+    required CropRect rect,
+    required CropRect originalRect,
+    required _DragHandle handle,
+    required CropAspectRatioLock? aspectRatioLock,
+  }) {
+    if (aspectRatioLock == null || !aspectRatioLock.isValid) {
+      return rect;
+    }
+
+    final targetRatio =
+        aspectRatioLock.ratio * (widget.previewSize.height / widget.previewSize.width);
+    if (targetRatio <= 0) {
+      return rect;
+    }
+
+    switch (handle) {
+      case _DragHandle.move:
+        return rect;
+      case _DragHandle.left:
+      case _DragHandle.right:
+        final targetHeight = rect.width / targetRatio;
+        final centerY = (originalRect.top + originalRect.bottom) / 2;
+        return rect.copyWith(
+          top: centerY - targetHeight / 2,
+          bottom: centerY + targetHeight / 2,
+        );
+      case _DragHandle.top:
+      case _DragHandle.bottom:
+        final targetWidth = rect.height * targetRatio;
+        final centerX = (originalRect.left + originalRect.right) / 2;
+        return rect.copyWith(
+          left: centerX - targetWidth / 2,
+          right: centerX + targetWidth / 2,
+        );
+      case _DragHandle.topLeft:
+        return rect.copyWith(
+          top: rect.bottom - (rect.width / targetRatio),
+        );
+      case _DragHandle.topRight:
+        return rect.copyWith(
+          top: rect.bottom - (rect.width / targetRatio),
+        );
+      case _DragHandle.bottomLeft:
+        return rect.copyWith(
+          bottom: rect.top + (rect.width / targetRatio),
+        );
+      case _DragHandle.bottomRight:
+        return rect.copyWith(
+          bottom: rect.top + (rect.width / targetRatio),
+        );
     }
   }
 
@@ -524,21 +625,96 @@ class _CropEditorState extends State<CropEditor> {
   }
 
   Rect _labelRect(Rect rect, int index) {
+    const iconSize = 22.0;
+    const iconSpacing = 10.0;
+    const rightPadding = 18.0;
     final painter = TextPainter(
-      text: TextSpan(
-        text: '#${index + 1}',
-        style: const TextStyle(
-          fontSize: 14,
+      text: const TextSpan(
+        text: '00',
+        style: TextStyle(
+          fontSize: 30,
           fontWeight: FontWeight.w800,
         ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
+    final digitCount = '${index + 1}'.length;
+    final textWidth = painter.width * (digitCount / 2).clamp(0.5, 2.0);
     return Rect.fromLTWH(
-      rect.left + 4,
-      rect.top + 4,
-      painter.width + 12,
-      painter.height + 8,
+      rect.left + 10,
+      rect.top + 10,
+      textWidth + 14 + iconSpacing + iconSize + rightPadding,
+      painter.height + 18,
+    );
+  }
+}
+
+class _RectInfoChip extends StatelessWidget {
+  const _RectInfoChip({
+    required this.index,
+    required this.selected,
+    required this.colorScheme,
+    required this.onTap,
+  });
+
+  final int index;
+  final bool selected;
+  final ColorScheme colorScheme;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final darkScheme = ColorScheme.fromSeed(
+      seedColor: colorScheme.primary,
+      brightness: Brightness.dark,
+    );
+    final backgroundColor = selected
+        ? Color.alphaBlend(
+            darkScheme.primary.withValues(alpha: 0.28),
+            darkScheme.surface.withValues(alpha: 0.82),
+          )
+        : darkScheme.surface.withValues(alpha: 0.52);
+    final borderColor = selected
+        ? darkScheme.primary.withValues(alpha: 0.42)
+        : darkScheme.outline.withValues(alpha: 0.4);
+    final foregroundColor = darkScheme.onSurface;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: 1.2),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 9, 18, 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${index + 1}',
+                  style: TextStyle(
+                    color: foregroundColor,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 22,
+                  color: foregroundColor,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -575,15 +751,6 @@ class _CropPainter extends CustomPainter {
       darkScheme.outline.withValues(alpha: 0.78),
       darkScheme.surface.withValues(alpha: 0.85),
     );
-    final activeLabelColor = Color.alphaBlend(
-      darkScheme.onPrimary.withValues(alpha: 0.88),
-      darkScheme.primary,
-    );
-    final inactiveLabelColor = Color.alphaBlend(
-      darkScheme.surface.withValues(alpha: 0.6),
-      darkScheme.onSurface.withValues(alpha: 0.3),
-    );
-
     for (var i = 0; i < cropRects.length; i++) {
       final rect = cropRects[i].toPreviewRect(imageRect.size).shift(imageRect.topLeft);
       final highlight = i == selectedRectIndex;
@@ -603,20 +770,6 @@ class _CropPainter extends CustomPainter {
         RRect.fromRectAndRadius(rect, const Radius.circular(8)),
         borderPaint,
       );
-
-      final labelPainter = TextPainter(
-        text: TextSpan(
-          text: '#${i + 1}',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-            backgroundColor: highlight ? activeLabelColor : inactiveLabelColor,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      labelPainter.paint(canvas, rect.topLeft + const Offset(6, 5));
 
       for (final point in [rect.topLeft, rect.topRight, rect.bottomLeft, rect.bottomRight]) {
         canvas.drawCircle(

@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 import 'dart:ui';
 
+import '../l10n/app_localizations.dart';
+import 'crop_aspect_ratio_lock.dart';
 import 'crop_rect.dart';
 import 'cluster_preview_data.dart';
 
@@ -19,6 +21,7 @@ class PageCluster {
     required this.previewPixelWidth,
     required this.previewPixelHeight,
     required this.cropRects,
+    required this.aspectRatioLocks,
     this.containsOutlierPage = false,
   });
 
@@ -35,16 +38,24 @@ class PageCluster {
   final int previewPixelWidth;
   final int previewPixelHeight;
   final List<CropRect> cropRects;
+  final List<CropAspectRatioLock?> aspectRatioLocks;
   final bool containsOutlierPage;
 
   String get title {
     final samplePages = pages.take(6).join(', ');
     final suffix = pages.length > 6 ? '...' : '';
-    return '$parityLabel · $layoutLabel（${pages.length}页）[$samplePages$suffix]';
+    return AppLocalizations.current.clusterTitle(
+      parityLabel,
+      layoutLabel,
+      pages.length,
+      samplePages,
+      suffix,
+    );
   }
 
   PageCluster copyWith({
     List<CropRect>? cropRects,
+    List<CropAspectRatioLock?>? aspectRatioLocks,
     Uint8List? previewImageBytes,
     Size? previewSize,
     Uint8List? previewBgraBytes,
@@ -68,6 +79,7 @@ class PageCluster {
       previewPixelWidth: previewPixelWidth ?? this.previewPixelWidth,
       previewPixelHeight: previewPixelHeight ?? this.previewPixelHeight,
       cropRects: cropRects ?? this.cropRects,
+      aspectRatioLocks: aspectRatioLocks ?? this.aspectRatioLocks,
       containsOutlierPage: containsOutlierPage ?? this.containsOutlierPage,
     );
   }

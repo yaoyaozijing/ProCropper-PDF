@@ -6,10 +6,10 @@ enum AppThemeMode {
   dark,
 }
 
-enum AppStyleMode {
-  material,
-  cupertino,
-  fluent,
+enum AppLanguageMode {
+  system,
+  zhCn,
+  en,
 }
 
 enum AppAccentMode {
@@ -26,25 +26,25 @@ enum AppAccentMode {
 class AppThemeSettings {
   const AppThemeSettings({
     this.themeMode = AppThemeMode.system,
-    this.styleMode = AppStyleMode.material,
+    this.languageMode = AppLanguageMode.system,
     this.accentMode = AppAccentMode.system,
     this.oledOptimized = false,
   });
 
   final AppThemeMode themeMode;
-  final AppStyleMode styleMode;
+  final AppLanguageMode languageMode;
   final AppAccentMode accentMode;
   final bool oledOptimized;
 
   AppThemeSettings copyWith({
     AppThemeMode? themeMode,
-    AppStyleMode? styleMode,
+    AppLanguageMode? languageMode,
     AppAccentMode? accentMode,
     bool? oledOptimized,
   }) {
     return AppThemeSettings(
       themeMode: themeMode ?? this.themeMode,
-      styleMode: styleMode ?? this.styleMode,
+      languageMode: languageMode ?? this.languageMode,
       accentMode: accentMode ?? this.accentMode,
       oledOptimized: oledOptimized ?? this.oledOptimized,
     );

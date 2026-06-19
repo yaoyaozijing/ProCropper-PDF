@@ -35,7 +35,7 @@ class AppSettingsService {
     }
 
     final themeModeIndex = raw['themeMode'] as int?;
-    final styleModeIndex = raw['styleMode'] as int?;
+    final languageModeIndex = raw['languageMode'] as int?;
     final accentModeIndex = raw['accentMode'] as int?;
     final oledOptimized = raw['oledOptimized'] as bool?;
 
@@ -45,11 +45,11 @@ class AppSettingsService {
               themeModeIndex < AppThemeMode.values.length
           ? AppThemeMode.values[themeModeIndex]
           : AppThemeMode.system,
-      styleMode: styleModeIndex != null &&
-              styleModeIndex >= 0 &&
-              styleModeIndex < AppStyleMode.values.length
-          ? AppStyleMode.values[styleModeIndex]
-          : AppStyleMode.material,
+      languageMode: languageModeIndex != null &&
+              languageModeIndex >= 0 &&
+              languageModeIndex < AppLanguageMode.values.length
+          ? AppLanguageMode.values[languageModeIndex]
+          : AppLanguageMode.system,
       accentMode: accentModeIndex != null &&
               accentModeIndex >= 0 &&
               accentModeIndex < AppAccentMode.values.length
@@ -62,7 +62,7 @@ class AppSettingsService {
   Future<void> saveThemeSettings(AppThemeSettings settings) async {
     await _box?.put(_themeSettingsKey, <String, Object>{
       'themeMode': settings.themeMode.index,
-      'styleMode': settings.styleMode.index,
+      'languageMode': settings.languageMode.index,
       'accentMode': settings.accentMode.index,
       'oledOptimized': settings.oledOptimized,
     });

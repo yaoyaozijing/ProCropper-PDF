@@ -1,5 +1,5 @@
-name: briss_flutter
-description: "A new Flutter project."
+name: procropper_pdf
+description: "ProCropper PDF，基于 Flutter 的 PDF 裁切工具。"
 publish_to: 'none'
 version: 0.1.0
 
@@ -9,7 +9,6 @@ environment:
 dependencies:
   desktop_drop: ^0.7.1
   file_picker: ^11.0.2
-  fluent_ui: ^4.15.1
   flutter:
     sdk: flutter
   flutter_localizations:
@@ -22,11 +21,25 @@ dependencies:
   pdfrx: ^2.4.4
   share_plus: ^12.0.2
   syncfusion_flutter_pdf: ^33.2.13+1
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  msix: ^3.17.0
+
+msix_config:
+  store: true
+  display_name: ProCropper PDF
+  publisher_display_name: 遥遥紫荆
+  identity_name: genryopicture.ProCropperPDF
+  publisher: CN=F2F54CF4-B104-48F4-AF36-4351B9E66834
+  msix_version: 0.1.0.0
+  logo_path: assets/branding/app_icon/app_icon_1024.png
+  architecture: x64
+  capabilities: internetClient
+  file_extension: .pdf
 
 flutter:
   uses-material-design: true

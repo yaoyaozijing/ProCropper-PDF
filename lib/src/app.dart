@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter/cupertino.dart';
 
+import 'l10n/app_localizations.dart';
 import 'models/app_theme_settings.dart';
 import 'pdf_crop_app.dart';
 import 'state/theme_controller.dart';
 
-class BrissFlutterApp extends StatelessWidget {
-  const BrissFlutterApp({
+class ProCropperPdfApp extends StatelessWidget {
+  const ProCropperPdfApp({
     required this.themeController,
+    this.initialPdfPath,
     super.key,
   });
 
   final ThemeController themeController;
+  final String? initialPdfPath;
 
   @override
   Widget build(BuildContext context) {
@@ -20,14 +22,26 @@ class BrissFlutterApp extends StatelessWidget {
       animation: themeController,
       builder: (context, child) {
         return MaterialApp(
-          title: 'Briss',
+          title: 'ProCropper PDF',
           debugShowCheckedModeBanner: false,
-          locale: const Locale('zh', 'CN'),
-          supportedLocales: const [Locale('zh', 'CN')],
+          locale: themeController.appLocale,
+          supportedLocales: const [
+            Locale('zh', 'CN'),
+            Locale('en'),
+          ],
+          localeResolutionCallback: (locale, supportedLocales) {
+            if (locale == null) {
+              return const Locale('en');
+            }
+            if (locale.languageCode.toLowerCase().startsWith('zh')) {
+              return const Locale('zh', 'CN');
+            }
+            return const Locale('en');
+          },
           localizationsDelegates: const [
+            AppLocalizations.delegate,
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
           ],
           themeMode: themeController.materialThemeMode,
           theme: _buildTheme(
@@ -38,7 +52,10 @@ class BrissFlutterApp extends StatelessWidget {
             brightness: Brightness.dark,
             settings: themeController.settings,
           ),
-          home: PdfCropApp(themeController: themeController),
+          home: PdfCropApp(
+            themeController: themeController,
+            initialPdfPath: initialPdfPath,
+          ),
         );
       },
     );
@@ -72,7 +89,7 @@ class BrissFlutterApp extends StatelessWidget {
     return ThemeData(
       colorScheme: colorScheme,
       brightness: brightness,
-      useMaterial3: settings.styleMode == AppStyleMode.material,
+      useMaterial3: true,
       scaffoldBackgroundColor: scaffoldColor,
       canvasColor: scaffoldColor,
       cardColor: cardColor,
@@ -115,22 +132,7 @@ class BrissFlutterApp extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         foregroundColor: colorScheme.onSurface,
       ),
-      cupertinoOverrideTheme: CupertinoThemeData(
-        brightness: brightness,
-        primaryColor: colorScheme.primary,
-        barBackgroundColor: scaffoldColor,
-        scaffoldBackgroundColor: scaffoldColor,
-        textTheme: CupertinoTextThemeData(
-          primaryColor: colorScheme.primary,
-          textStyle: TextStyle(color: colorScheme.onSurface),
-        ),
-      ),
-      listTileTheme: ListTileThemeData(
-        shape: settings.styleMode == AppStyleMode.cupertino
-            ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))
-            : null,
-        iconColor: settings.styleMode == AppStyleMode.cupertino ? colorScheme.primary : null,
-      ),
+      listTileTheme: const ListTileThemeData(),
     );
   }
 

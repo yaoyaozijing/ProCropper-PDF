@@ -3,12 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'l10n/app_localizations.dart';
 import 'models/app_grouping_settings.dart';
 import 'models/cluster_settings.dart';
 import 'services/app_settings_service.dart';
 import 'services/cache_service.dart';
 import 'state/theme_controller.dart';
 import 'theme_settings_page.dart';
+import 'widgets/windows_window_controls.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
@@ -41,20 +43,32 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('设置'),
+        title: WindowsDragToMoveArea(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(l10n.settings),
+          ),
+        ),
+        actions: const [
+          WindowsWindowControls(),
+          SizedBox(width: 8),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           _SettingsGroup(
-            title: '外观',
+            title: l10n.appearance,
             children: [
               ListTile(
                 leading: const Icon(Icons.palette_outlined),
-                title: const Text('主题设置'),
-                subtitle: const Text('深浅模式、主题色与 OLED 优化'),
+                title: Text(l10n.themeSettings),
+                subtitle: Text(
+                  '${l10n.darkMode}/${l10n.lightMode}、${l10n.themeColors}、${l10n.oledOptimization}',
+                ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () {
                   Navigator.of(context).push(
@@ -70,20 +84,20 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 18),
           _SettingsGroup(
-            title: '文档',
+            title: l10n.documents,
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      '默认分组模式',
+                    Text(
+                      l10n.defaultGroupingMode,
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '打开 PDF 时默认使用这个智能分组等级。',
+                      l10n.defaultGroupingModeDescription,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -115,13 +129,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     if (Platform.isAndroid) ...[
                       const SizedBox(height: 22),
-                      const Text(
-                        '默认导出方式',
+                      Text(
+                        l10n.defaultExportMode,
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        '用于安卓导出。可选择每次询问，或直接保存、直接分享。',
+                        l10n.defaultExportModeDescription,
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
@@ -158,8 +172,8 @@ class _SettingsPageState extends State<SettingsPage> {
                               child: CircularProgressIndicator(strokeWidth: 2.2),
                             )
                           : const Icon(Icons.cleaning_services_outlined),
-                      title: const Text('清理缓存'),
-                      subtitle: const Text('清除应用临时目录中的导出缓存和残留文件。'),
+                      title: Text(l10n.clearCache),
+                      subtitle: Text(l10n.clearCacheDescription),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       enabled: !_clearingCache,
                       onTap: _clearingCache ? null : _clearCache,
@@ -171,23 +185,23 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 18),
           _SettingsGroup(
-            title: '关于',
+            title: l10n.about,
             children: [
               ListTile(
                 leading: const Icon(Icons.info_outline_rounded),
-                title: const Text('Briss_Flutter 版本'),
-                subtitle: Text(_packageInfo == null ? '读取中...' : _packageInfo!.version),
+                title: Text(l10n.versionLabel),
+                subtitle: Text(_packageInfo == null ? l10n.loading : _packageInfo!.version),
               ),
               ListTile(
                 leading: const Icon(Icons.description_outlined),
-                title: const Text('Third Party Licences'),
-                subtitle: const Text('查看第三方依赖许可信息'),
+                title: Text(l10n.thirdPartyLicenses),
+                subtitle: Text(l10n.thirdPartyLicensesDescription),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (context) => LicensePage(
-                        applicationName: 'Briss_Flutter',
+                        applicationName: 'ProCropper PDF',
                         applicationVersion: _packageInfo == null ? '0.1.0' : _packageInfo!.version,
                       ),
                     ),
@@ -259,9 +273,7 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            deletedCount > 0 ? '已清理 $deletedCount 项缓存。' : '没有发现可清理的缓存。',
-          ),
+          content: Text(AppLocalizations.current.cacheCleared(deletedCount)),
         ),
       );
     } catch (error) {
@@ -270,7 +282,9 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('清理缓存失败：$error'),
+          content: Text(
+            AppLocalizations.current.clearCacheFailed(error.toString()),
+          ),
         ),
       );
     } finally {
@@ -283,46 +297,50 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   String _smartGroupingLevelLabel(SmartGroupingLevel level) {
+    final l10n = AppLocalizations.current;
     switch (level) {
       case SmartGroupingLevel.basic:
-        return '基础';
+        return l10n.groupingLevelBasic;
       case SmartGroupingLevel.balanced:
-        return '平衡';
+        return l10n.groupingModeBalanced;
       case SmartGroupingLevel.strict:
-        return '严格';
+        return l10n.groupingLevelStrict;
     }
   }
 
   String _smartGroupingLevelDescription(SmartGroupingLevel level) {
+    final l10n = AppLocalizations.current;
     switch (level) {
       case SmartGroupingLevel.basic:
-        return '优先按基础尺寸分组，速度更快，细分更少。';
+        return l10n.groupingModeBasicDescription;
       case SmartGroupingLevel.balanced:
-        return '在准确度和分组数量之间保持平衡，适合作为默认模式。';
+        return l10n.groupingModeBalancedDescription;
       case SmartGroupingLevel.strict:
-        return '更积极地区分版式差异，适合页面结构变化较多的文档。';
+        return l10n.groupingModeStrictDescription;
     }
   }
 
   String _androidExportModeLabel(AndroidExportMode mode) {
+    final l10n = AppLocalizations.current;
     switch (mode) {
       case AndroidExportMode.askEveryTime:
-        return '每次询问';
+        return l10n.askEveryTime;
       case AndroidExportMode.save:
-        return '直接保存';
+        return l10n.saveDirectly;
       case AndroidExportMode.share:
-        return '直接分享';
+        return l10n.shareDirectly;
     }
   }
 
   String _androidExportModeDescription(AndroidExportMode mode) {
+    final l10n = AppLocalizations.current;
     switch (mode) {
       case AndroidExportMode.askEveryTime:
-        return '每次导出时都先选择保存还是分享。';
+        return l10n.askEveryTimeDescription;
       case AndroidExportMode.save:
-        return '直接进入保存流程，使用系统文档选择器。';
+        return l10n.saveDirectlyDescription;
       case AndroidExportMode.share:
-        return '直接导出到临时文件，并打开系统分享窗口。';
+        return l10n.shareDirectlyDescription;
     }
   }
 }

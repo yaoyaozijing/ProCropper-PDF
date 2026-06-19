@@ -6,13 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
+import 'l10n/app_localizations.dart';
 import 'models/app_grouping_settings.dart';
 import 'models/cluster_settings.dart';
+import 'models/crop_aspect_ratio_lock.dart';
 import 'models/page_cluster.dart';
 import 'services/app_settings_service.dart';
 import 'state/pdf_editor_controller.dart';
 import 'widgets/crop_editor.dart';
 import 'widgets/status_corner_card.dart';
+import 'widgets/windows_window_controls.dart';
 
 class PdfEditorPage extends StatefulWidget {
   const PdfEditorPage({
@@ -76,8 +79,10 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final project = _controller.project;
     final cluster = _controller.selectedCluster;
+    final isCompact = MediaQuery.sizeOf(context).width < 700;
 
     return Scaffold(
       appBar: AppBar(
@@ -86,61 +91,64 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
           children: [
             const BackButton(),
             IconButton(
-              tooltip: _showClusterPanel ? '收起分组栏' : '展开分组栏',
-              onPressed: () {
-                setState(() {
-                  _showClusterPanel = !_showClusterPanel;
-                });
-              },
+              tooltip: isCompact
+                  ? l10n.clusterPanelOpen
+                  : (_showClusterPanel ? l10n.collapseClusterPanel : l10n.expandClusterPanel),
+              onPressed: isCompact ? _showClusterBottomSheet : _toggleClusterPanel,
               icon: Icon(Icons.menu),
             ),
           ],
         ),
-        title: Text(
-          project?.fileName ?? '未加载 PDF',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        title: WindowsDragToMoveArea(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              project?.fileName ?? l10n.openPdf,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ),
         actions: [
-          IconButton(
-            tooltip: '缩小',
-            onPressed: project == null ? null : _viewportController.zoomOut,
-            icon: const Icon(Icons.zoom_out_rounded),
-          ),
-          IconButton(
-            tooltip: '放大',
-            onPressed: project == null ? null : _viewportController.zoomIn,
-            icon: const Icon(Icons.zoom_in_rounded),
-          ),
-          IconButton(
-            tooltip: _showToolPanel ? '收起工具栏' : '展开工具栏',
-            onPressed: () {
-              setState(() {
-                _showToolPanel = !_showToolPanel;
-              });
-            },
-            icon: Icon(Icons.info),
-          ),
-          TextButton.icon(
-            onPressed: _controller.isBusy ? null : _pickPdf,
-            icon: const Icon(Icons.folder_open_rounded),
-            label: const Text('打开'),
-          ),
+          _buildToolActionsButton(isCompact),
+          if (!isCompact)
+            TextButton.icon(
+              onPressed: _controller.isBusy ? null : _pickPdf,
+              icon: const Icon(Icons.folder_open_rounded),
+              label: Text(l10n.open),
+            ),
           const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: project == null || _controller.isBusy ? null : _exportPdf,
-            icon: const Icon(Icons.download_rounded),
-            label: const Text('导出'),
-          ),
-          const SizedBox(width: 18),
+          if (isCompact)
+            FilledButton(
+              onPressed: project == null || _controller.isBusy ? null : _exportPdf,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(40, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+              child: const Icon(Icons.download_rounded),
+            )
+          else
+            FilledButton.icon(
+              onPressed: project == null || _controller.isBusy ? null : _exportPdf,
+              icon: const Icon(Icons.download_rounded),
+              label: Text(l10n.export),
+            ),
+          const WindowsWindowControls(),
+          const SizedBox(width: 8),
         ],
       ),
       body: Stack(
         children: [
-          if (project != null && cluster != null) _buildEditor(cluster) else _buildMissingProject(),
+          if (project != null && cluster != null)
+            _buildEditor(
+              cluster,
+              isCompact: isCompact,
+            )
+          else
+            _buildMissingProject(),
           if (_statusMessage != null)
             StatusCornerCard(
-              title: '提示',
+              title: l10n.tips,
               message: _statusMessage!,
               icon: Icon(
                 Icons.info_outline_rounded,
@@ -151,8 +159,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
             ),
           if (_controller.isBusy)
             StatusCornerCard(
-              title: '正在处理',
-              message: _controller.status ?? '正在处理任务...',
+              title: l10n.processing,
+              message: _controller.status ?? l10n.processingTask,
               bottom: _statusMessage != null ? (_shouldShowExportOverlay ? 354 : 186) : (_shouldShowExportOverlay ? 186 : 18),
             ),
           if (_shouldShowExportOverlay) _buildExportOverlay(),
@@ -167,18 +175,21 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       _controller.lastExportError != null;
 
   Widget _buildMissingProject() {
+    final l10n = context.l10n;
     return Center(
       child: FilledButton.icon(
         onPressed: _pickPdf,
         icon: const Icon(Icons.upload_file_rounded),
-        label: const Text('重新打开 PDF'),
+        label: Text(l10n.reopenPdf),
       ),
     );
   }
 
-  Widget _buildEditor(PageCluster cluster) {
+  Widget _buildEditor(PageCluster cluster, {required bool isCompact}) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final showClusterPanel = !isCompact && _showClusterPanel;
+    final showToolPanel = !isCompact && _showToolPanel;
 
     return Stack(
       children: [
@@ -187,87 +198,191 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
             previewBytes: cluster.previewImageBytes,
             previewSize: cluster.previewSize,
             cropRects: cluster.cropRects,
+            aspectRatioLocks: cluster.aspectRatioLocks,
             selectedRectIndex: _controller.selectedRectIndex,
             colorScheme: colorScheme,
             onRectSelected: _controller.selectRect,
             onRectChanged: _controller.updateSelectedRect,
+            onRectDeleteRequested: _removeRectByIndex,
             onRectInfoRequested: _showRectInfoDialog,
             contentPadding: EdgeInsets.fromLTRB(
-              _showClusterPanel ? _clusterPanelWidth + 36 : 18,
+              showClusterPanel ? _clusterPanelWidth + 36 : 18,
               18,
-              _showToolPanel ? _toolPanelWidth + 36 : 18,
+              showToolPanel ? _toolPanelWidth + 36 : 18,
               18,
             ),
             viewportController: _viewportController,
           ),
         ),
-        Positioned(
-          left: _showClusterPanel ? 18 : -(_clusterPanelWidth + 24),
-          top: 18,
-          bottom: 18,
-          child: IgnorePointer(
-            ignoring: !_showClusterPanel,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 180),
-              opacity: _showClusterPanel ? 1 : 0,
-              child: SizedBox(
-                width: _clusterPanelWidth,
-                child: _buildFloatingPanel(
-                  child: Column(
-                    children: [
-                      _buildClusterActionsBar(),
-                      Expanded(
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                          itemCount: _controller.clusters.length,
-                          itemBuilder: (context, index) {
-                            final item = _controller.clusters[index];
-                            return _ClusterTile(
-                              cluster: item,
-                              pageLabel: _formatPageRanges(item.pages),
-                              selected: index == _controller.selectedClusterIndex,
-                              multiSelected: _selectedClusterIndices.contains(index),
-                              onTap: () => _controller.selectCluster(index),
-                              onCheckChanged: (value) => _toggleClusterSelection(index, value),
-                            );
-                          },
-                        ),
-                      ),
-                      _buildSidebarFooter(),
-                    ],
+        if (!isCompact)
+          Positioned(
+            left: _showClusterPanel ? 18 : -(_clusterPanelWidth + 24),
+            top: 18,
+            bottom: 18,
+            child: IgnorePointer(
+              ignoring: !_showClusterPanel,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: _showClusterPanel ? 1 : 0,
+                child: SizedBox(
+                  width: _clusterPanelWidth,
+                  child: _buildFloatingPanel(
+                    child: _buildClusterPanelContent(),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-        Positioned(
-          top: 18,
-          right: _showToolPanel ? 18 : -(_toolPanelWidth + 24),
-          bottom: 18,
-          child: IgnorePointer(
-            ignoring: !_showToolPanel,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 180),
-              opacity: _showToolPanel ? 1 : 0,
-              child: SizedBox(
-                width: _toolPanelWidth,
-                child: _buildToolbarPanel(),
+        if (!isCompact)
+          Positioned(
+            top: 18,
+            right: _showToolPanel ? 18 : -(_toolPanelWidth + 24),
+            bottom: 18,
+            child: IgnorePointer(
+              ignoring: !_showToolPanel,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: _showToolPanel ? 1 : 0,
+                child: SizedBox(
+                  width: _toolPanelWidth,
+                  child: _buildToolbarPanel(),
+                ),
               ),
             ),
           ),
+      ],
+    );
+  }
+
+  Widget _buildToolActionsButton(bool isCompact) {
+    final l10n = context.l10n;
+    if (!isCompact) {
+      return IconButton(
+        tooltip: _showToolPanel ? l10n.collapseToolbar : l10n.expandToolbar,
+        onPressed: _toggleToolPanel,
+        icon: const Icon(Icons.info),
+      );
+    }
+
+    return PopupMenuButton<_CompactToolbarAction>(
+      tooltip: l10n.toolMenu,
+      icon: const Icon(Icons.info),
+      onSelected: _handleCompactToolbarAction,
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: _CompactToolbarAction.openPdf,
+          child: Text(l10n.openPdf),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _CompactToolbarAction.zoomOut,
+          child: Text(l10n.zoomOut),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.zoomIn,
+          child: Text(l10n.zoomIn),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _CompactToolbarAction.recalculateCurrent,
+          child: Text(l10n.recalculateCurrent),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.recalculateAll,
+          child: Text(l10n.recalculateAll),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _CompactToolbarAction.addRect,
+          child: Text(l10n.addCropRect),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.removeRect,
+          child: Text(l10n.removeCurrentRect),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.splitVertical,
+          child: Text(l10n.splitHorizontal),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.splitHorizontal,
+          child: Text(l10n.splitVertical),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _CompactToolbarAction.copyRects,
+          child: Text(l10n.copyPreset),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.pasteRects,
+          child: Text(l10n.pastePreset),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _CompactToolbarAction.applyAll,
+          child: Text(l10n.applyToAll),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.applyEven,
+          child: Text(l10n.applyToEven),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.applyOdd,
+          child: Text(l10n.applyToOdd),
         ),
       ],
     );
   }
 
+  Widget _buildClusterPanelContent({
+    VoidCallback? onClusterSelected,
+  }) {
+    return Column(
+      children: [
+        _buildClusterActionsBar(),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            itemCount: _controller.clusters.length,
+            itemBuilder: (context, index) {
+              final item = _controller.clusters[index];
+              return _ClusterTile(
+                cluster: item,
+                pageLabel: _formatPageRanges(item.pages),
+                selected: index == _controller.selectedClusterIndex,
+                multiSelected: _selectedClusterIndices.contains(index),
+                onTap: () {
+                  _controller.selectCluster(index);
+                  onClusterSelected?.call();
+                },
+                onCheckChanged: (value) => _toggleClusterSelection(index, value),
+              );
+            },
+          ),
+        ),
+        _buildSidebarFooter(),
+      ],
+    );
+  }
+
   Widget _buildSidebarFooter() {
+    final l10n = context.l10n;
     final project = _controller.project!;
     final excludedPages = _controller.settings.excludedPages.toList()..sort();
     final edgeFilterText = _formatEdgeFilterSummary(_controller.settings.edgeFilter);
     final summaryText = excludedPages.isEmpty
-        ? '共 ${project.pageCount} 页，${project.clusters.length} 个分组，排除无，过滤 $edgeFilterText'
-        : '共 ${project.pageCount} 页，${project.clusters.length} 个分组，排除第 ${_formatPageRanges(excludedPages)} 页，过滤 $edgeFilterText';
+        ? l10n.summaryText(
+            pageCount: project.pageCount,
+            clusterCount: project.clusters.length,
+            excludedText: l10n.noExcludedPages,
+            filterText: edgeFilterText,
+          )
+        : l10n.summaryText(
+            pageCount: project.pageCount,
+            clusterCount: project.clusters.length,
+            excludedText: l10n.excludedPagesLabel(_formatPageRanges(excludedPages)),
+            filterText: edgeFilterText,
+          );
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -291,14 +406,14 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                     onSubmitted: (_) => _locatePageFromField(),
                     decoration: InputDecoration(
                       isDense: true,
-                      hintText: '输入页码定位分组',
+                      hintText: l10n.locatePageHint,
                       border: const OutlineInputBorder(),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: '确认定位',
+                  tooltip: l10n.confirmLocate,
                   onPressed: _locatePageFromField,
                   icon: const Icon(Icons.check_rounded),
                 ),
@@ -318,7 +433,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
           FilledButton.tonalIcon(
                 onPressed: _showLocatePageField ? _hideLocatePageField : _showLocatePageFieldInput,
                 icon: Icon(_showLocatePageField ? Icons.keyboard_hide_rounded : Icons.search_rounded),
-                label: Text(_showLocatePageField ? '收起' : '定位'),
+                label: Text(_showLocatePageField ? l10n.collapse : l10n.locate),
               ),
             ],
           ),
@@ -328,7 +443,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   }
 
   Widget _buildClusterActionsBar() {
-    final canMerge = _selectedClusterIndices.length >= 2;
+    final l10n = context.l10n;
+    final canMerge = _canMergeSelectedClusters();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Column(
@@ -339,7 +455,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                 child: OutlinedButton.icon(
                   onPressed: _showRegroupDialog,
                   icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('重置'),
+                  label: Text(l10n.reset),
                 ),
               ),
               const SizedBox(width: 10),
@@ -347,7 +463,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                 child: OutlinedButton.icon(
                   onPressed: canMerge ? _mergeSelectedClusters : null,
                   icon: const Icon(Icons.merge_type_rounded),
-                  label: Text('合并'),
+                  label: Text(l10n.merge),
                 ),
               ),
               const SizedBox(width: 10),
@@ -355,7 +471,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                 child: OutlinedButton.icon(
                   onPressed: _showSplitPagesDialog,
                   icon: const Icon(Icons.create_new_folder_outlined),
-                  label: const Text('新建'),
+                  label: Text(l10n.create),
                 ),
               ),
             ],
@@ -365,7 +481,22 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     );
   }
 
+  bool _canMergeSelectedClusters() {
+    if (_selectedClusterIndices.length < 2) {
+      return false;
+    }
+    final selectedClusters = _selectedClusterIndices
+        .map((index) => _controller.clusters[index])
+        .toList(growable: false);
+    final firstCluster = selectedClusters.first;
+    return selectedClusters.every((cluster) {
+      return cluster.pageWidth == firstCluster.pageWidth &&
+          cluster.pageHeight == firstCluster.pageHeight;
+    });
+  }
+
   Widget _buildToolbarPanel() {
+    final l10n = context.l10n;
     final theme = Theme.of(context);
     return _buildFloatingPanel(
       child: Padding(
@@ -375,22 +506,36 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                '工具',
+                l10n.toolSection,
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 12),
               _buildToolbarButton(
+                onPressed: _viewportController.zoomOut,
+                icon: Icons.zoom_out_rounded,
+                label: l10n.zoomOut,
+              ),
+              const SizedBox(height: 10),
+              _buildToolbarButton(
+                onPressed: _viewportController.zoomIn,
+                icon: Icons.zoom_in_rounded,
+                label: l10n.zoomIn,
+              ),
+              const SizedBox(height: 14),
+              Divider(color: Theme.of(context).colorScheme.outlineVariant),
+              const SizedBox(height: 14),
+              _buildToolbarButton(
                 onPressed: _controller.recalculateAutoCropForSelectedCluster,
                 icon: Icons.auto_awesome_rounded,
-                label: '计算当前',
+                label: l10n.recalculateCurrent,
               ),
               const SizedBox(height: 10),
               _buildToolbarButton(
                 onPressed: _controller.recalculateAutoCropForAllClusters,
                 icon: Icons.auto_awesome_rounded,
-                label: '计算全部',
+                label: l10n.recalculateAll,
               ),
               const SizedBox(height: 14),
               Divider(color: Theme.of(context).colorScheme.outlineVariant),
@@ -398,25 +543,25 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
               _buildToolbarButton(
                 onPressed: _controller.addRect,
                 icon: Icons.add_rounded,
-                label: '添加裁剪框',
+                label: l10n.addCropRect,
               ),
               const SizedBox(height: 10),
               _buildToolbarButton(
                 onPressed: _controller.removeSelectedRect,
                 icon: Icons.delete_outline,
-                label: '移除当前框',
+                label: l10n.removeCurrentRect,
               ),
               const SizedBox(height: 10),
               _buildToolbarButton(
                 onPressed: _controller.splitSelectedRectVertically,
                 icon: Icons.view_week_outlined,
-                label: '水平拆分',
+                label: l10n.splitHorizontal,
               ),
               const SizedBox(height: 10),
               _buildToolbarButton(
                 onPressed: _controller.splitSelectedRectHorizontally,
                 icon: Icons.view_agenda_outlined,
-                label: '垂直拆分',
+                label: l10n.splitVertical,
               ),
               const SizedBox(height: 14),
               Divider(color: Theme.of(context).colorScheme.outlineVariant),
@@ -424,45 +569,112 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
               _buildToolbarButton(
                 onPressed: _controller.copyCurrentRects,
                 icon: Icons.copy_all_outlined,
-                label: '复制方案',
+                label: l10n.copyPreset,
               ),
               const SizedBox(height: 10),
               _buildToolbarButton(
                 onPressed: _controller.hasClipboard ? _controller.pasteRectsToSelectedCluster : null,
                 icon: Icons.assignment_return_outlined,
-                label: '粘贴方案',
+                label: l10n.pastePreset,
               ),
               const SizedBox(height: 14),
               Divider(color: Theme.of(context).colorScheme.outlineVariant),
               const SizedBox(height: 14),
               _buildToolbarButton(
-                onPressed: () => _controller.applyCurrentRectsTo(ApplyTarget.currentCluster),
-                icon: Icons.vertical_align_center_rounded,
-                label: '应用到当前',
-              ),
-              const SizedBox(height: 10),
-              _buildToolbarButton(
                 onPressed: () => _controller.applyCurrentRectsTo(ApplyTarget.allClusters),
                 icon: Icons.select_all_rounded,
-                label: '应用到全部',
+                label: l10n.applyToAll,
               ),
               const SizedBox(height: 10),
               _buildToolbarButton(
                 onPressed: () => _controller.applyCurrentRectsTo(ApplyTarget.evenClusters),
                 icon: Icons.filter_2_rounded,
-                label: '应用到偶数',
+                label: l10n.applyToEven,
               ),
               const SizedBox(height: 10),
               _buildToolbarButton(
                 onPressed: () => _controller.applyCurrentRectsTo(ApplyTarget.oddClusters),
                 icon: Icons.filter_1_rounded,
-                label: '应用到奇数',
+                label: l10n.applyToOdd,
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _showClusterBottomSheet() async {
+    final theme = Theme.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return FractionallySizedBox(
+          heightFactor: 0.86,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: _buildFloatingPanel(
+              child: Theme(
+                data: theme,
+                child: _buildClusterPanelContent(
+                  onClusterSelected: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _toggleClusterPanel() {
+    setState(() {
+      _showClusterPanel = !_showClusterPanel;
+    });
+  }
+
+  void _toggleToolPanel() {
+    setState(() {
+      _showToolPanel = !_showToolPanel;
+    });
+  }
+
+  void _handleCompactToolbarAction(_CompactToolbarAction action) {
+    switch (action) {
+      case _CompactToolbarAction.openPdf:
+        _pickPdf();
+      case _CompactToolbarAction.zoomOut:
+        _viewportController.zoomOut();
+      case _CompactToolbarAction.zoomIn:
+        _viewportController.zoomIn();
+      case _CompactToolbarAction.recalculateCurrent:
+        _controller.recalculateAutoCropForSelectedCluster();
+      case _CompactToolbarAction.recalculateAll:
+        _controller.recalculateAutoCropForAllClusters();
+      case _CompactToolbarAction.addRect:
+        _controller.addRect();
+      case _CompactToolbarAction.removeRect:
+        _controller.removeSelectedRect();
+      case _CompactToolbarAction.splitVertical:
+        _controller.splitSelectedRectVertically();
+      case _CompactToolbarAction.splitHorizontal:
+        _controller.splitSelectedRectHorizontally();
+      case _CompactToolbarAction.copyRects:
+        _controller.copyCurrentRects();
+      case _CompactToolbarAction.pasteRects:
+        if (_controller.hasClipboard) {
+          _controller.pasteRectsToSelectedCluster();
+        }
+      case _CompactToolbarAction.applyAll:
+        _controller.applyCurrentRectsTo(ApplyTarget.allClusters);
+      case _CompactToolbarAction.applyEven:
+        _controller.applyCurrentRectsTo(ApplyTarget.evenClusters);
+      case _CompactToolbarAction.applyOdd:
+        _controller.applyCurrentRectsTo(ApplyTarget.oddClusters);
+    }
   }
 
   Widget _buildFloatingPanel({required Widget child}) {
@@ -512,20 +724,21 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   }
 
   Widget _buildExportOverlay() {
+    final l10n = context.l10n;
     final theme = Theme.of(context);
     final progress = _controller.exportProgress;
     final isDone = !_controller.isExporting && _controller.lastExportPath != null;
     final hasError = !_controller.isExporting && _controller.lastExportError != null;
     final title = isDone
-        ? '导出完成'
+        ? l10n.exportCompleted
         : hasError
-            ? '导出失败'
-            : '正在后台导出';
+            ? l10n.exportFailed
+            : l10n.exportingInBackground;
     final message = isDone
         ? _controller.lastExportPath!
         : hasError
             ? _controller.lastExportError!
-            : (_controller.exportStatus ?? '正在处理导出任务...');
+            : (_controller.exportStatus ?? l10n.processingTask);
 
     return Positioned(
       right: 18,
@@ -574,7 +787,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   ),
                   const Spacer(),
                   IconButton(
-                    tooltip: '关闭',
+                    tooltip: l10n.close,
                     onPressed: _controller.dismissExportFeedback,
                     icon: const Icon(Icons.close_rounded),
                     visualDensity: VisualDensity.compact,
@@ -603,13 +816,13 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                     FilledButton.tonalIcon(
                       onPressed: () => _openExportedPdf(_controller.lastExportPath!),
                       icon: const Icon(Icons.file_open_rounded),
-                      label: const Text('打开 PDF'),
+                      label: Text(l10n.openPdf),
                     ),
                     const SizedBox(width: 10),
                     FilledButton.tonalIcon(
                       onPressed: () => _openExportDirectory(_controller.lastExportPath!),
                       icon: const Icon(Icons.folder_open_rounded),
-                      label: const Text('打开目录'),
+                      label: Text(l10n.openDirectory),
                     ),
                   ],
                 ),
@@ -620,7 +833,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: _controller.dismissExportFeedback,
-                    child: const Text('关闭'),
+                    child: Text(l10n.close),
                   ),
                 ),
               ],
@@ -647,7 +860,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       if (!mounted) {
         return;
       }
-      _showMessage('打开 PDF 失败：$error');
+      _showMessage(context.l10n.openPdfFailed(error.toString()));
     }
   }
 
@@ -690,7 +903,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       if (!mounted) {
         return;
       }
-      _showMessage('导出失败：$error');
+      _showMessage(context.l10n.exportFailedWithError(error.toString()));
     }
   }
 
@@ -700,14 +913,15 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       builder: (context) {
         var doNotAskAgain = false;
         return AlertDialog(
-          title: const Text('导出 PDF'),
+          title: Text(context.l10n.chooseExportMethodTitle),
           content: StatefulBuilder(
             builder: (context, setState) {
+              final l10n = context.l10n;
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('请选择导出方式。保存会写入你选择的位置，分享会先导出再打开系统分享窗口。'),
+                  Text(l10n.chooseExportMethodDescription),
                   const SizedBox(height: 14),
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
@@ -717,8 +931,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                         doNotAskAgain = value ?? false;
                       });
                     },
-                    title: const Text('请勿询问'),
-                    subtitle: const Text('之后默认使用本次选择的导出方式。'),
+                    title: Text(l10n.doNotAskAgain),
+                    subtitle: Text(l10n.rememberExportChoice),
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
                 ],
@@ -728,7 +942,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
+              child: Text(context.l10n.cancel),
             ),
             FilledButton.tonal(
               onPressed: () {
@@ -739,7 +953,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   ),
                 );
               },
-              child: const Text('分享'),
+              child: Text(context.l10n.share),
             ),
             FilledButton(
               onPressed: () {
@@ -750,7 +964,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   ),
                 );
               },
-              child: const Text('保存'),
+              child: Text(context.l10n.save),
             ),
           ],
         );
@@ -759,6 +973,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   }
 
   Future<void> _performAndroidExport(_AndroidExportAction action) async {
+    final l10n = context.l10n;
     if (action == _AndroidExportAction.save) {
       final destinationUri = await _controller.createAndroidDocumentUri(
         fileName: _suggestedOutputFileName(),
@@ -770,23 +985,28 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       return;
     }
 
-    final outputPath = await _controller.export();
+    final outputPath = await _controller.createTemporaryExportPath();
     if (outputPath == null) {
       return;
     }
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(outputPath, mimeType: 'application/pdf')],
-        text: _suggestedOutputFileName(),
-      ),
-    );
-    _controller.dismissExportFeedback();
-    _showMessage('分享窗口已打开。');
+    try {
+      await _controller.export(destinationPath: outputPath);
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(outputPath, mimeType: 'application/pdf')],
+          text: _suggestedOutputFileName(),
+        ),
+      );
+      _controller.dismissExportFeedback();
+      _showMessage(l10n.exportShareOpened);
+    } finally {
+      await _controller.deleteTemporaryExport(outputPath);
+    }
   }
 
   Future<String?> _resolveExportDestinationPath() async {
     final result = await FilePicker.saveFile(
-      dialogTitle: '保存裁边后的 PDF',
+      dialogTitle: context.l10n.saveCroppedPdf,
       fileName: _suggestedOutputFileName(),
       type: FileType.custom,
       allowedExtensions: ['pdf'],
@@ -839,8 +1059,9 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
+        final l10n = context.l10n;
         return AlertDialog(
-          title: const Text('重新分组设置'),
+          title: Text(l10n.regroupSettings),
           content: SizedBox(
             width: 420,
             child: Column(
@@ -852,15 +1073,15 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   builder: (context, value, child) {
                     return SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('区分奇偶页'),
-                      subtitle: const Text('关闭后，奇偶页会按尺寸合并到同一类分组。'),
+                      title: Text(l10n.separateOddEven),
+                      subtitle: Text(l10n.separateOddEvenDescription),
                       value: value,
                       onChanged: (next) => oddEven.value = next,
                     );
                   },
                 ),
                 const SizedBox(height: 10),
-                const Text('智能分组等级'),
+                Text(l10n.smartGroupingLevel),
                 const SizedBox(height: 8),
                 ValueListenableBuilder<SmartGroupingLevel>(
                   valueListenable: smartGroupingLevel,
@@ -884,10 +1105,10 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 14),
-                const Text('四边过滤百分比'),
+                Text(l10n.edgeFilterPercentage),
                 const SizedBox(height: 6),
                 Text(
-                  '会先忽略页面四周对应比例的区域，再进行分组分析和自动识别。',
+                  l10n.edgeFilterDescription,
                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 10),
@@ -902,7 +1123,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                         right: 0,
                         bottom: 0.06,
                       ),
-                      child: const Text('忽略页眉页脚'),
+                      child: Text(l10n.ignoreHeaderFooter),
                     ),
                     OutlinedButton(
                       onPressed: () => applyEdgeFilterPreset(
@@ -911,7 +1132,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                         right: 0.10,
                         bottom: 0,
                       ),
-                      child: const Text('忽略侧边标记'),
+                      child: Text(l10n.ignoreSideMarks),
                     ),
                     OutlinedButton(
                       onPressed: () => applyEdgeFilterPreset(
@@ -920,7 +1141,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                         right: 0.04,
                         bottom: 0.05,
                       ),
-                      child: const Text('温和过滤'),
+                      child: Text(l10n.gentleFilter),
                     ),
                   ],
                 ),
@@ -931,8 +1152,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                       child: TextField(
                         controller: leftFilterController,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: '左 %',
+                        decoration: InputDecoration(
+                          labelText: l10n.leftPercent,
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -942,8 +1163,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                       child: TextField(
                         controller: topFilterController,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: '上 %',
+                        decoration: InputDecoration(
+                          labelText: l10n.topPercent,
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -957,8 +1178,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                       child: TextField(
                         controller: rightFilterController,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: '右 %',
+                        decoration: InputDecoration(
+                          labelText: l10n.rightPercent,
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -968,8 +1189,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                       child: TextField(
                         controller: bottomFilterController,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: '下 %',
+                        decoration: InputDecoration(
+                          labelText: l10n.bottomPercent,
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -977,18 +1198,18 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   ],
                 ),
                 const SizedBox(height: 14),
-                const Text('排除页码'),
+                Text(l10n.excludedPages),
                 const SizedBox(height: 6),
                 TextField(
                   controller: excludedText,
-                  decoration: const InputDecoration(
-                    hintText: '例如：1, 3, 5-8',
+                  decoration: InputDecoration(
+                    hintText: l10n.pageRangeExample,
                     border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '这些页面不会参与自动分组与预览生成。',
+                  l10n.excludedPagesDescription,
                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
@@ -997,11 +1218,11 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
+              child: Text(l10n.cancel),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('应用'),
+              child: Text(l10n.apply),
             ),
           ],
         );
@@ -1026,7 +1247,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         if (!mounted) {
           return;
         }
-        _showMessage('重新分组失败：$error');
+        _showMessage(context.l10n.regroupFailed(error.toString()));
       }
     }
   }
@@ -1039,11 +1260,12 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       if (!mounted) {
         return;
       }
-      _showMessage('合并分组失败：$error');
+      _showMessage(context.l10n.mergeFailed(error.toString()));
     }
   }
 
   Future<void> _showSplitPagesDialog() async {
+    final l10n = context.l10n;
     final project = _controller.project;
     if (project == null) {
       return;
@@ -1053,23 +1275,24 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
+        final l10n = context.l10n;
         return AlertDialog(
-          title: const Text('新建分组'),
+          title: Text(l10n.createGroupTitle),
           content: SizedBox(
             width: 420,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('输入要归入新分组的页码。创建后，这些页会自动从其它分组中移除。'),
+                Text(l10n.createGroupDescription),
                 const SizedBox(height: 12),
                 TextField(
                   controller: pageTextController,
                   autofocus: true,
                   decoration: InputDecoration(
-                    hintText: '例如：1, 3, 5-8',
+                    hintText: l10n.pageRangeExample,
                     border: const OutlineInputBorder(),
-                    helperText: '总页数：${project.pageCount} 页',
+                    helperText: l10n.totalPagesHelper(project.pageCount),
                   ),
                 ),
               ],
@@ -1078,11 +1301,11 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
+              child: Text(l10n.cancel),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('创建分组'),
+              child: Text(l10n.createGroupAction),
             ),
           ],
         );
@@ -1095,14 +1318,14 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
             .where((page) => page >= 1 && page <= project.pageCount)
             .toSet();
         if (selectedPages.isEmpty) {
-          throw const FormatException('请输入有效页码。');
+          throw FormatException(l10n.invalidPageSelection);
         }
         await _controller.createClusterFromPages(selectedPages);
       } catch (error) {
         if (!mounted) {
           return;
         }
-        _showMessage('新建分组失败：$error');
+        _showMessage(l10n.createGroupFailed(error.toString()));
       }
     }
 
@@ -1143,11 +1366,11 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     try {
       final page = int.parse(_locatePageController.text.trim());
       if (page < 1 || page > project.pageCount) {
-        throw FormatException('页码超出范围，请输入 1 到 ${project.pageCount} 之间的数字。');
+        throw FormatException(context.l10n.pageOutOfRange(project.pageCount));
       }
       final clusterIndex = _controller.clusters.indexWhere((cluster) => cluster.pages.contains(page));
       if (clusterIndex == -1) {
-        throw const FormatException('没有在任何分组中找到该页。');
+        throw FormatException(context.l10n.pageNotFoundInAnyGroup);
       }
       _controller.selectCluster(clusterIndex);
       _hideLocatePageField();
@@ -1155,7 +1378,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       if (!mounted) {
         return;
       }
-      _showMessage('查找页面失败：$error');
+      _showMessage(context.l10n.locatePageFailed(error.toString()));
     }
   }
 
@@ -1165,46 +1388,123 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       return;
     }
     final rect = cluster.cropRects[index];
+    final left = rect.left * cluster.pageWidth;
+    final top = rect.top * cluster.pageHeight;
+    final right = rect.right * cluster.pageWidth;
+    final bottom = rect.bottom * cluster.pageHeight;
+    final width = rect.width * cluster.pageWidth;
+    final height = rect.height * cluster.pageHeight;
+    final currentLock = cluster.aspectRatioLocks[index];
+    final lockEnabled = ValueNotifier<bool>(currentLock != null);
+    final lockWidthController = TextEditingController(
+      text: currentLock?.width.toStringAsFixed(currentLock.width == currentLock.width.roundToDouble() ? 0 : 1) ?? '',
+    );
+    final lockHeightController = TextEditingController(
+      text: currentLock?.height.toStringAsFixed(currentLock.height == currentLock.height.roundToDouble() ? 0 : 1) ?? '',
+    );
     _controller.selectRect(index);
 
     showDialog<void>(
       context: context,
       builder: (context) {
+        final l10n = context.l10n;
         return AlertDialog(
-          title: Text('裁剪框 #${index + 1}'),
+          title: Text(l10n.cropBoxTitle(index + 1)),
           content: SizedBox(
             width: 360,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '左 ${(rect.left * 100).toStringAsFixed(1)}%',
-                ),
+                Text(l10n.pixelLeft(left)),
                 const SizedBox(height: 8),
-                Text(
-                  '上 ${(rect.top * 100).toStringAsFixed(1)}%',
-                ),
+                Text(l10n.pixelTop(top)),
                 const SizedBox(height: 8),
-                Text(
-                  '右 ${(rect.right * 100).toStringAsFixed(1)}%',
-                ),
+                Text(l10n.pixelRight(right)),
                 const SizedBox(height: 8),
-                Text(
-                  '下 ${(rect.bottom * 100).toStringAsFixed(1)}%',
-                ),
+                Text(l10n.pixelBottom(bottom)),
                 const SizedBox(height: 12),
                 Text(
-                  '宽 ${(rect.width * 100).toStringAsFixed(1)}%  高 ${(rect.height * 100).toStringAsFixed(1)}%',
+                  l10n.pixelSize(width, height),
                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 18),
+                ValueListenableBuilder<bool>(
+                  valueListenable: lockEnabled,
+                  builder: (context, enabled, child) {
+                    return CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: enabled,
+                      onChanged: (value) => lockEnabled.value = value ?? false,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: Text(l10n.lockAspectRatio),
+                      subtitle: Text(l10n.lockAspectRatioDescription),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+                ValueListenableBuilder<bool>(
+                  valueListenable: lockEnabled,
+                  builder: (context, enabled, child) {
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: lockWidthController,
+                            enabled: enabled,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: InputDecoration(
+                              labelText: l10n.width,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: lockHeightController,
+                            enabled: enabled,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: InputDecoration(
+                              labelText: l10n.height,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
           ),
           actions: [
+            FilledButton(
+              onPressed: () {
+                try {
+                  CropAspectRatioLock? nextLock;
+                  if (lockEnabled.value) {
+                    final lockWidth = double.parse(lockWidthController.text.trim());
+                    final lockHeight = double.parse(lockHeightController.text.trim());
+                    if (lockWidth <= 0 || lockHeight <= 0) {
+                      throw FormatException(l10n.aspectRatioPositive);
+                    }
+                    nextLock = CropAspectRatioLock(
+                      width: lockWidth,
+                      height: lockHeight,
+                    );
+                  }
+                  _controller.updateSelectedRectAspectRatioLock(nextLock);
+                  Navigator.of(context).pop();
+                } catch (error) {
+                  _showMessage(l10n.aspectRatioFailed(error.toString()));
+                }
+              },
+              child: Text(l10n.apply),
+            ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('关闭'),
+              child: Text(l10n.close),
             ),
           ],
         );
@@ -1222,6 +1522,15 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     });
   }
 
+  void _removeRectByIndex(int index) {
+    final cluster = _controller.selectedCluster;
+    if (cluster == null || cluster.cropRects.length <= 1) {
+      return;
+    }
+    _controller.selectRect(index);
+    _controller.removeSelectedRect();
+  }
+
   Set<int> _parsePageSelection(String text) {
     final result = <int>{};
     for (final rawPart in text.split(',')) {
@@ -1232,7 +1541,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       if (part.contains('-')) {
         final bounds = part.split('-').map((item) => int.tryParse(item.trim())).toList();
         if (bounds.length != 2 || bounds[0] == null || bounds[1] == null) {
-          throw FormatException('页码格式不正确：$part');
+          throw FormatException(context.l10n.invalidPageFormat(part));
         }
         final start = bounds[0]!;
         final end = bounds[1]!;
@@ -1244,7 +1553,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       } else {
         final page = int.tryParse(part);
         if (page == null) {
-          throw FormatException('页码格式不正确：$part');
+          throw FormatException(context.l10n.invalidPageFormat(part));
         }
         result.add(page);
       }
@@ -1278,24 +1587,26 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   }
 
   String _smartGroupingLevelLabel(SmartGroupingLevel level) {
+    final l10n = AppLocalizations.current;
     switch (level) {
       case SmartGroupingLevel.basic:
-        return '基础';
+        return l10n.groupingLevelBasic;
       case SmartGroupingLevel.balanced:
-        return '智能';
+        return l10n.groupingLevelBalanced;
       case SmartGroupingLevel.strict:
-        return '严格';
+        return l10n.groupingLevelStrict;
     }
   }
 
   String _smartGroupingLevelDescription(SmartGroupingLevel level) {
+    final l10n = AppLocalizations.current;
     switch (level) {
       case SmartGroupingLevel.basic:
-        return '仅按页面尺寸和奇偶页分组，速度最快。';
+        return l10n.groupingLevelBasicDescription;
       case SmartGroupingLevel.balanced:
-        return '按尺寸粗分后，再结合页面版式指纹细分，适合大多数文档。';
+        return l10n.groupingLevelBalancedDescription;
       case SmartGroupingLevel.strict:
-        return '更敏感地拆分不同版式页面，裁边更稳，但分组会更多。';
+        return l10n.groupingLevelStrictDescription;
     }
   }
 
@@ -1308,21 +1619,26 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   double _parsePercentValue(String text) {
     final value = double.tryParse(text.trim());
     if (value == null) {
-      throw FormatException('过滤百分比格式不正确：$text');
+      throw FormatException(AppLocalizations.current.invalidPercentFormat(text));
     }
     return (value / 100).clamp(0.0, 45.0 / 100).toDouble();
   }
 
   String _formatEdgeFilterSummary(EdgeFilterSettings settings) {
-    return '左${_formatPercentValue(settings.left)} 上${_formatPercentValue(settings.top)} 右${_formatPercentValue(settings.right)} 下${_formatPercentValue(settings.bottom)}';
+    return AppLocalizations.current.edgeFilterSummary(
+      left: _formatPercentValue(settings.left),
+      top: _formatPercentValue(settings.top),
+      right: _formatPercentValue(settings.right),
+      bottom: _formatPercentValue(settings.bottom),
+    );
   }
 
   String _suggestedOutputFileName() {
     final fileName = _controller.project?.fileName ?? 'output.pdf';
     if (fileName.toLowerCase().endsWith('.pdf')) {
-      return '${fileName.substring(0, fileName.length - 4)}_裁边后.pdf';
+      return AppLocalizations.current.croppedFileName(fileName);
     }
-    return '${fileName}_裁边后.pdf';
+    return AppLocalizations.current.croppedFileNameFallback(fileName);
   }
 
   Future<void> _openExportDirectory(String outputPath) async {
@@ -1340,12 +1656,12 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         await Process.run('xdg-open', [directoryPath]);
         return;
       }
-      _showMessage('当前平台暂不支持自动打开目录。');
+      _showMessage(context.l10n.openDirectoryUnsupported);
     } catch (error) {
       if (!mounted) {
         return;
       }
-      _showMessage('打开目录失败：$error');
+      _showMessage(context.l10n.openDirectoryFailed(error.toString()));
     }
   }
 
@@ -1363,12 +1679,12 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         await Process.run('xdg-open', [outputPath]);
         return;
       }
-      _showMessage('当前平台暂不支持自动打开 PDF。');
+      _showMessage(context.l10n.openPdfUnsupported);
     } catch (error) {
       if (!mounted) {
         return;
       }
-      _showMessage('打开 PDF 失败：$error');
+      _showMessage(context.l10n.openPdfFailed(error.toString()));
     }
   }
 
@@ -1403,6 +1719,23 @@ class _AndroidExportDecision {
   final bool doNotAskAgain;
 }
 
+enum _CompactToolbarAction {
+  openPdf,
+  zoomOut,
+  zoomIn,
+  recalculateCurrent,
+  recalculateAll,
+  addRect,
+  removeRect,
+  splitVertical,
+  splitHorizontal,
+  copyRects,
+  pasteRects,
+  applyAll,
+  applyEven,
+  applyOdd,
+}
+
 class _ClusterTile extends StatelessWidget {
   const _ClusterTile({
     required this.cluster,
@@ -1422,6 +1755,7 @@ class _ClusterTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final colorScheme = Theme.of(context).colorScheme;
     return Card(
       color: selected
@@ -1474,7 +1808,7 @@ class _ClusterTile extends StatelessWidget {
                             ),
                             if (cluster.containsOutlierPage)
                               _ClusterBadge(
-                                label: '离群页',
+                                label: l10n.outlierPage,
                                 selected: selected,
                                 emphasized: false,
                               ),
@@ -1482,7 +1816,7 @@ class _ClusterTile extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          '共 ${cluster.pages.length} 页',
+                          l10n.pageCountLabel(cluster.pages.length),
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 4),

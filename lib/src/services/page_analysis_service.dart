@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:pdfrx/pdfrx.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/cluster_settings.dart';
 import '../models/crop_rect.dart';
 
@@ -209,7 +210,7 @@ class PageAnalysisService {
           columnProfile: <double>[],
         ),
         suggestedCrop: CropRect.full,
-        layoutLabel: '空白页',
+        layoutLabel: AppLocalizations.current.blankPage,
       );
     }
 
@@ -352,24 +353,24 @@ class PageAnalysisService {
     required double footerDensity,
   }) {
     if (inkRatio < 0.01) {
-      return '空白页';
+      return AppLocalizations.current.blankPage;
     }
     final contentHeight = contentBounds.height;
     final topMargin = contentBounds.top;
     final bottomMargin = 1 - contentBounds.bottom;
     if (inkRatio > 0.22) {
-      return '重内容页';
+      return AppLocalizations.current.heavyContentPage;
     }
     if (contentHeight < 0.58 || (topMargin > 0.18 && bottomMargin > 0.18)) {
-      return '标题页';
+      return AppLocalizations.current.titlePage;
     }
     if (headerDensity > footerDensity * 1.45 && topMargin < 0.1) {
-      return '页眉明显';
+      return AppLocalizations.current.headerProminent;
     }
     if (footerDensity > headerDensity * 1.45 && bottomMargin < 0.1) {
-      return '页脚明显';
+      return AppLocalizations.current.footerProminent;
     }
-    return '正文页';
+    return AppLocalizations.current.bodyPage;
   }
 
   static List<double> _normalizeProfile(List<double> values, double divisor) {

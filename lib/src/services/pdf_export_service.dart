@@ -5,15 +5,17 @@ import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/crop_rect.dart';
 import '../models/pdf_project.dart';
+import 'cache_service.dart';
 
 class PdfExportService {
   static const MethodChannel _documentsChannel =
-      MethodChannel('briss_flutter/android_documents');
+      MethodChannel('procropper_pdf/android_documents');
+  final CacheService _cacheService = CacheService();
 
   Future<String> export({
     required PdfProject project,
@@ -22,12 +24,11 @@ class PdfExportService {
     String? destinationUri,
     void Function(double progress, String message)? onProgress,
   }) async {
+    final cleanupTemporaryOutput = destinationUri != null;
     final effectiveOutputPath = destinationUri == null
         ? (destinationPath ?? _defaultOutputPath(project.filePath))
-        : await _temporaryExportPath(project.filePath);
-    final outputPath = destinationUri == null
-        ? effectiveOutputPath
-        : effectiveOutputPath;
+        : await createTemporaryExportPath(project.filePath);
+    final outputPath = effectiveOutputPath;
     final receivePort = ReceivePort();
     final request = <String, Object?>{
       'replyPort': receivePort.sendPort,
@@ -66,17 +67,19 @@ class PdfExportService {
       await Isolate.spawn(_runExportInIsolate, request);
       final generatedPath = await completer.future;
       if (destinationUri != null) {
-        onProgress?.call(0.995, '正在写入所选位置...');
+        onProgress?.call(0.995, AppLocalizations.current.writingSelectedLocation);
         await _writeFileToUri(destinationUri, generatedPath);
-        try {
-          await File(generatedPath).delete();
-        } catch (_) {
-          // Ignore temp file cleanup failure.
-        }
         return destinationUri;
       }
       return generatedPath;
     } finally {
+      if (cleanupTemporaryOutput) {
+        try {
+          await deleteTemporaryExport(outputPath);
+        } catch (_) {
+          // Ignore temp file cleanup failure.
+        }
+      }
       await subscription.cancel();
       receivePort.close();
     }
@@ -106,6 +109,18 @@ class PdfExportService {
     return p.join(dir, '${base}_cropped$ext');
   }
 
+  Future<String> createTemporaryExportPath(String inputPath) async {
+    final exportDir = await _cacheService.getExportCacheDirectory();
+    return p.join(
+      exportDir.path,
+      '${p.basenameWithoutExtension(inputPath)}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+    );
+  }
+
+  Future<void> deleteTemporaryExport(String path) {
+    return _cacheService.deleteTemporaryFile(path);
+  }
+
   List<Map<String, Object>> _serializePageCropMap(Map<int, List<CropRect>> pageCropMap) {
     final entries = <Map<String, Object>>[];
     final sortedPages = pageCropMap.keys.toList()..sort();
@@ -126,14 +141,6 @@ class PdfExportService {
       });
     }
     return entries;
-  }
-
-  Future<String> _temporaryExportPath(String inputPath) async {
-    final tempDir = await getTemporaryDirectory();
-    return p.join(
-      tempDir.path,
-      '${p.basenameWithoutExtension(inputPath)}_${DateTime.now().millisecondsSinceEpoch}.pdf',
-    );
   }
 
   Future<void> _writeFileToUri(String destinationUri, String sourcePath) async {
@@ -172,7 +179,7 @@ Future<void> _runExportInIsolate(Map<String, Object?> request) async {
   replyPort.send({
     'type': 'progress',
     'progress': 0.0,
-    'message': '正在读取源文件...',
+    'message': AppLocalizations.current.readingSourceFile,
   });
 
   final sourceBytes = await File(sourcePath).readAsBytes();
@@ -209,20 +216,20 @@ Future<void> _runExportInIsolate(Map<String, Object?> request) async {
       replyPort.send({
         'type': 'progress',
         'progress': ((index + 1) / pageCount) * 0.92,
-        'message': '正在处理第 ${index + 1} / $pageCount 页...',
+        'message': AppLocalizations.current.processingPage(index + 1, pageCount),
       });
     }
 
     replyPort.send({
       'type': 'progress',
       'progress': 0.96,
-      'message': '正在生成导出文件...',
+      'message': AppLocalizations.current.generatingExportFile,
     });
     final bytes = await outputDocument.save();
     replyPort.send({
       'type': 'progress',
       'progress': 0.99,
-      'message': '正在写入磁盘...',
+      'message': AppLocalizations.current.writingToDisk,
     });
     await File(outputPath).writeAsBytes(bytes, flush: true);
     replyPort.send({

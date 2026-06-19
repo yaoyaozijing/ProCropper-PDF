@@ -1,3 +1,3 @@
-# briss_flutter
+# ProCropper PDF
 
-使用Flutter实现的PDF裁边器，参考了Briss。
+使用 Flutter 实现的 PDF 裁切工具。

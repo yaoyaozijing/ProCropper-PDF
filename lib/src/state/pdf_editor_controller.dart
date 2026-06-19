@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/cluster_settings.dart';
+import '../models/crop_aspect_ratio_lock.dart';
 import '../models/crop_rect.dart';
 import '../models/crop_clipboard.dart';
 import '../models/page_cluster.dart';
@@ -39,6 +41,8 @@ class PdfEditorController extends ChangeNotifier {
   String? _lastExportError;
   CropClipboard? _clipboard;
 
+  AppLocalizations get _l10n => AppLocalizations.current;
+
   PdfProject? get project => _project;
   bool get isBusy => _isBusy;
   bool get isExporting => _isExporting;
@@ -59,7 +63,7 @@ class PdfEditorController extends ChangeNotifier {
     String filePath, {
     ClusterSettings initialSettings = const ClusterSettings(),
   }) async {
-    await _runBusy('正在加载 PDF...', () async {
+    await _runBusy(_l10n.loadingPdf, () async {
       final previousProject = _project;
       _project = null;
       notifyListeners();
@@ -94,13 +98,26 @@ class PdfEditorController extends ChangeNotifier {
     _replaceCluster(cluster.copyWith(cropRects: updatedRects));
   }
 
+  void updateSelectedRectAspectRatioLock(CropAspectRatioLock? aspectRatioLock) {
+    final cluster = selectedCluster;
+    if (cluster == null || cluster.cropRects.isEmpty) {
+      return;
+    }
+    final updatedLocks = [...cluster.aspectRatioLocks];
+    updatedLocks[_selectedRectIndex] = aspectRatioLock;
+    _replaceCluster(cluster.copyWith(aspectRatioLocks: updatedLocks));
+  }
+
   void addRect() {
     final cluster = selectedCluster;
     if (cluster == null) {
       return;
     }
     final updatedRects = [...cluster.cropRects, CropRect.full];
-    _replaceCluster(cluster.copyWith(cropRects: updatedRects));
+    final updatedLocks = [...cluster.aspectRatioLocks, null];
+    _replaceCluster(
+      cluster.copyWith(cropRects: updatedRects, aspectRatioLocks: updatedLocks),
+    );
     _selectedRectIndex = updatedRects.length - 1;
     notifyListeners();
   }
@@ -111,7 +128,10 @@ class PdfEditorController extends ChangeNotifier {
       return;
     }
     final updatedRects = [...cluster.cropRects]..removeAt(_selectedRectIndex);
-    _replaceCluster(cluster.copyWith(cropRects: updatedRects));
+    final updatedLocks = [...cluster.aspectRatioLocks]..removeAt(_selectedRectIndex);
+    _replaceCluster(
+      cluster.copyWith(cropRects: updatedRects, aspectRatioLocks: updatedLocks),
+    );
     _selectedRectIndex = _selectedRectIndex.clamp(0, updatedRects.length - 1);
     notifyListeners();
   }
@@ -130,7 +150,15 @@ class PdfEditorController extends ChangeNotifier {
     final updatedRects = [...cluster.cropRects]
       ..removeAt(_selectedRectIndex)
       ..insertAll(_selectedRectIndex, split);
-    _replaceCluster(cluster.copyWith(cropRects: updatedRects));
+    final updatedLocks = [...cluster.aspectRatioLocks]
+      ..removeAt(_selectedRectIndex)
+      ..insertAll(
+        _selectedRectIndex,
+        List<CropAspectRatioLock?>.filled(split.length, null),
+      );
+    _replaceCluster(
+      cluster.copyWith(cropRects: updatedRects, aspectRatioLocks: updatedLocks),
+    );
     notifyListeners();
   }
 
@@ -148,7 +176,15 @@ class PdfEditorController extends ChangeNotifier {
     final updatedRects = [...cluster.cropRects]
       ..removeAt(_selectedRectIndex)
       ..insertAll(_selectedRectIndex, split);
-    _replaceCluster(cluster.copyWith(cropRects: updatedRects));
+    final updatedLocks = [...cluster.aspectRatioLocks]
+      ..removeAt(_selectedRectIndex)
+      ..insertAll(
+        _selectedRectIndex,
+        List<CropAspectRatioLock?>.filled(split.length, null),
+      );
+    _replaceCluster(
+      cluster.copyWith(cropRects: updatedRects, aspectRatioLocks: updatedLocks),
+    );
     notifyListeners();
   }
 
@@ -159,6 +195,7 @@ class PdfEditorController extends ChangeNotifier {
     }
     _clipboard = CropClipboard(
       cropRects: cluster.cropRects.map((rect) => rect.normalized()).toList(),
+      aspectRatioLocks: List<CropAspectRatioLock?>.of(cluster.aspectRatioLocks),
       sourceClusterId: cluster.id,
     );
     notifyListeners();
@@ -172,6 +209,7 @@ class PdfEditorController extends ChangeNotifier {
     _replaceCluster(
       cluster.copyWith(
         cropRects: _clipboard!.cropRects.map((rect) => rect.normalized()).toList(),
+        aspectRatioLocks: List<CropAspectRatioLock?>.of(_clipboard!.aspectRatioLocks),
       ),
     );
   }
@@ -182,7 +220,7 @@ class PdfEditorController extends ChangeNotifier {
     if (cluster == null || project == null) {
       return;
     }
-    await _runBusy('正在重新计算当前分组的自动裁边...', () async {
+    await _runBusy(_l10n.recalculatingCurrentAutoCrop, () async {
       final rebuilt = await _projectService.rebuildAutoCropForCluster(
         project.document,
         cluster,
@@ -197,7 +235,7 @@ class PdfEditorController extends ChangeNotifier {
     if (_project == null) {
       return;
     }
-    await _runBusy('正在重新计算全部分组的自动裁边...', () async {
+    await _runBusy(_l10n.recalculatingAllAutoCrop, () async {
       final rebuiltClusters = <PageCluster>[];
       for (final cluster in clusters) {
         rebuiltClusters.add(
@@ -227,6 +265,7 @@ class PdfEditorController extends ChangeNotifier {
     }
 
     final sourceRects = source.cropRects.map((rect) => rect.normalized()).toList();
+    final sourceLocks = List<CropAspectRatioLock?>.of(source.aspectRatioLocks);
     final currentClusters = [...clusters];
 
     for (var i = 0; i < currentClusters.length; i++) {
@@ -234,11 +273,14 @@ class PdfEditorController extends ChangeNotifier {
       final shouldApply = switch (target) {
         ApplyTarget.currentCluster => cluster.id == source.id,
         ApplyTarget.allClusters => true,
-        ApplyTarget.evenClusters => cluster.parityLabel == '偶数',
-        ApplyTarget.oddClusters => cluster.parityLabel == '奇数',
+        ApplyTarget.evenClusters => cluster.parityLabel == _l10n.even,
+        ApplyTarget.oddClusters => cluster.parityLabel == _l10n.odd,
       };
       if (shouldApply) {
-        currentClusters[i] = cluster.copyWith(cropRects: sourceRects);
+        currentClusters[i] = cluster.copyWith(
+          cropRects: sourceRects,
+          aspectRatioLocks: sourceLocks,
+        );
       }
     }
 
@@ -263,7 +305,7 @@ class PdfEditorController extends ChangeNotifier {
       return;
     }
 
-    await _runBusy('正在重新分组...', () async {
+    await _runBusy(_l10n.regrouping, () async {
       final nextSettings = ClusterSettings(
         separateOddEven: separateOddEven,
         excludedPages: {...excludedPages},
@@ -284,7 +326,17 @@ class PdfEditorController extends ChangeNotifier {
       return;
     }
 
-    await _runBusy('正在合并分组...', () async {
+    final sourceClusters = selectedIndices.map((index) => clusters[index]).toList();
+    final firstCluster = sourceClusters.first;
+    final hasMixedPageSizes = sourceClusters.any((cluster) {
+      return cluster.pageWidth != firstCluster.pageWidth ||
+          cluster.pageHeight != firstCluster.pageHeight;
+    });
+    if (hasMixedPageSizes) {
+      throw FormatException(_l10n.cannotMergeDifferentSizes);
+    }
+
+    await _runBusy(_l10n.mergingGroups, () async {
       final sortedIndices = [...selectedIndices]..sort();
       final sourceClusters = sortedIndices.map((index) => clusters[index]).toList();
       final mergedPages = sourceClusters.expand((cluster) => cluster.pages).toList()..sort();
@@ -293,6 +345,7 @@ class PdfEditorController extends ChangeNotifier {
         pages: mergedPages,
         parityLabel: _mergedParityLabel(sourceClusters),
         cropRects: sourceClusters.first.cropRects.map((rect) => rect.normalized()).toList(),
+        aspectRatioLocks: List<CropAspectRatioLock?>.of(sourceClusters.first.aspectRatioLocks),
       );
 
       final updatedClusters = <PageCluster>[];
@@ -322,7 +375,7 @@ class PdfEditorController extends ChangeNotifier {
       return;
     }
 
-    await _runBusy('正在新建分组...', () async {
+    await _runBusy(_l10n.creatingGroup, () async {
       final selectedPages = pageNumbers.toList()..sort();
       final newCluster = await _projectService.createManualClusterFromPages(
         _project!.document,
@@ -346,6 +399,7 @@ class PdfEditorController extends ChangeNotifier {
             pages: remainingPages,
             parityLabel: _parityLabelForPages(remainingPages),
             cropRects: cluster.cropRects.map((rect) => rect.normalized()).toList(),
+            aspectRatioLocks: List<CropAspectRatioLock?>.of(cluster.aspectRatioLocks),
           ),
         );
       }
@@ -383,7 +437,7 @@ class PdfEditorController extends ChangeNotifier {
     String? outputPath;
     _isExporting = true;
     _exportProgress = 0;
-    _exportStatus = '正在准备导出...';
+    _exportStatus = _l10n.preparingExport;
     _lastExportPath = null;
     _lastExportError = null;
     notifyListeners();
@@ -400,13 +454,13 @@ class PdfEditorController extends ChangeNotifier {
         },
       );
       _exportProgress = 1;
-      _exportStatus = '导出完成';
+      _exportStatus = _l10n.exportCompleted;
       _lastExportPath = outputPath;
       _lastExportError = null;
       return outputPath;
     } catch (error) {
       _exportProgress = null;
-      _exportStatus = '导出失败';
+      _exportStatus = _l10n.exportFailed;
       _lastExportPath = null;
       _lastExportError = error.toString();
       rethrow;
@@ -450,16 +504,16 @@ class PdfEditorController extends ChangeNotifier {
 
   String _mergedParityLabel(List<PageCluster> clustersToMerge) {
     final labels = clustersToMerge.map((cluster) => cluster.parityLabel).toSet();
-    return labels.length == 1 ? labels.first : '混合';
+    return labels.length == 1 ? labels.first : _l10n.mixed;
   }
 
   String _parityLabelForPages(List<int> pages) {
     final hasOdd = pages.any((page) => page.isOdd);
     final hasEven = pages.any((page) => page.isEven);
     if (hasOdd && hasEven) {
-      return '混合';
+      return _l10n.mixed;
     }
-    return hasEven ? '偶数' : '奇数';
+    return hasEven ? _l10n.even : _l10n.odd;
   }
 
   Future<void> _runBusy(String status, Future<void> Function() action) async {
@@ -492,5 +546,17 @@ class PdfEditorController extends ChangeNotifier {
       fileName: fileName,
       mimeType: mimeType,
     );
+  }
+
+  Future<String?> createTemporaryExportPath() {
+    final currentProject = _project;
+    if (currentProject == null) {
+      return Future.value(null);
+    }
+    return _exportService.createTemporaryExportPath(currentProject.filePath);
+  }
+
+  Future<void> deleteTemporaryExport(String path) {
+    return _exportService.deleteTemporaryExport(path);
   }
 }

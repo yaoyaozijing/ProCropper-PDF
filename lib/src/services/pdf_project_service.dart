@@ -3,7 +3,9 @@ import 'dart:typed_data';
 
 import 'package:pdfrx/pdfrx.dart';
 
+import '../l10n/app_localizations.dart';
 import '../models/cluster_settings.dart';
+import '../models/crop_aspect_ratio_lock.dart';
 import '../models/crop_rect.dart';
 import '../models/page_cluster.dart';
 import '../models/pdf_project.dart';
@@ -14,6 +16,8 @@ import 'preview_merge_service.dart';
 class PdfProjectService {
   static const int _maxPreviewPages = 12;
   static const int _mergeVariability = 20;
+
+  AppLocalizations get _l10n => AppLocalizations.current;
 
   Future<PdfProject> open(
     String filePath, {
@@ -50,15 +54,15 @@ class PdfProjectService {
           ? (page.pageNumber.isEven ? 'even' : 'odd')
           : 'all';
       final parityLabel = settings.separateOddEven
-          ? (page.pageNumber.isEven ? '偶数' : '奇数')
-          : '混合';
+          ? (page.pageNumber.isEven ? _l10n.even : _l10n.odd)
+          : _l10n.mixed;
       final key = '$parityKey-$roundedWidth-$roundedHeight';
       final bucket = coarseBuckets.putIfAbsent(
         key,
         () => _ClusterSeedBucket(
           id: key,
           parityLabel: parityLabel,
-          layoutLabel: '混合版式',
+          layoutLabel: _l10n.mixedLayout,
           groupingReason: '',
           pageWidth: width,
           pageHeight: height,
@@ -125,6 +129,7 @@ class PdfProjectService {
           previewPixelWidth: preview.width,
           previewPixelHeight: preview.height,
           cropRects: [autoCrop],
+          aspectRatioLocks: const [null],
           containsOutlierPage: bucket.containsOutlierPage,
         ),
       );
@@ -159,7 +164,10 @@ class PdfProjectService {
       height: cluster.previewPixelHeight,
       edgeFilter: edgeFilter,
     );
-    return cluster.copyWith(cropRects: [_clampCropToPage(autoCrop)]);
+    return cluster.copyWith(
+      cropRects: [_clampCropToPage(autoCrop)],
+      aspectRatioLocks: const [null],
+    );
   }
 
   Future<PageCluster> createManualClusterFromPages(
@@ -167,6 +175,7 @@ class PdfProjectService {
     required List<int> pages,
     required String parityLabel,
     List<CropRect>? cropRects,
+    List<CropAspectRatioLock?>? aspectRatioLocks,
   }) async {
     final sortedPages = [...pages]..sort();
     final firstPage = document.pages[sortedPages.first - 1];
@@ -207,6 +216,12 @@ class PdfProjectService {
       previewPixelWidth: preview.width,
       previewPixelHeight: preview.height,
       cropRects: cropRects != null ? List.of(cropRects) : [suggestedCrop],
+      aspectRatioLocks: aspectRatioLocks != null
+          ? List<CropAspectRatioLock?>.of(aspectRatioLocks)
+          : List<CropAspectRatioLock?>.filled(
+              cropRects != null ? cropRects.length : 1,
+              null,
+            ),
       containsOutlierPage: false,
     );
   }
@@ -219,10 +234,10 @@ class PdfProjectService {
     if (level == SmartGroupingLevel.basic || bucket.pages.length <= 1) {
       return [
         bucket.copyWith(
-          layoutLabel: analyzedPages[bucket.pages.first]?.layoutLabel ?? '混合版式',
+          layoutLabel: analyzedPages[bucket.pages.first]?.layoutLabel ?? _l10n.mixedLayout,
           groupingReason: _buildGroupingReason(
             parityLabel: bucket.parityLabel,
-            layoutLabel: analyzedPages[bucket.pages.first]?.layoutLabel ?? '混合版式',
+            layoutLabel: analyzedPages[bucket.pages.first]?.layoutLabel ?? _l10n.mixedLayout,
             pageWidth: bucket.pageWidth,
             pageHeight: bucket.pageHeight,
             pageCount: bucket.pages.length,
@@ -420,10 +435,12 @@ class PdfProjectService {
           bucket.copyWith(
             id: '${bucket.id}-outlier-$pageNumber',
             pages: [pageNumber],
-            layoutLabel: '${analyzedPages[pageNumber]?.layoutLabel ?? '异常页'} · 离群',
+            layoutLabel:
+                '${analyzedPages[pageNumber]?.layoutLabel ?? _l10n.anomalyPage} · ${_l10n.outlierSuffix}',
             groupingReason: _buildGroupingReason(
               parityLabel: bucket.parityLabel,
-              layoutLabel: '${analyzedPages[pageNumber]?.layoutLabel ?? '异常页'} · 离群',
+              layoutLabel:
+                  '${analyzedPages[pageNumber]?.layoutLabel ?? _l10n.anomalyPage} · ${_l10n.outlierSuffix}',
               pageWidth: bucket.pageWidth,
               pageHeight: bucket.pageHeight,
               pageCount: 1,
@@ -445,12 +462,12 @@ class PdfProjectService {
   ) {
     final counts = <String, int>{};
     for (final page in pages) {
-      final label = analyzedPages[page]?.layoutLabel ?? '混合版式';
+      final label = analyzedPages[page]?.layoutLabel ?? _l10n.mixedLayout;
       counts.update(label, (value) => value + 1, ifAbsent: () => 1);
     }
     final sorted = counts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    return sorted.isEmpty ? '混合版式' : sorted.first.key;
+    return sorted.isEmpty ? _l10n.mixedLayout : sorted.first.key;
   }
 
   String _manualLayoutLabel({
@@ -458,9 +475,9 @@ class PdfProjectService {
     required String parityLabel,
   }) {
     if (pages.length == 1) {
-      return '手动单页';
+      return _l10n.manualSinglePage;
     }
-    return parityLabel == '混合' ? '手动混合组' : '手动分组';
+    return parityLabel == _l10n.mixed ? _l10n.manualMixedGroup : _l10n.manualGroup;
   }
 
   static String _buildGroupingReason({
@@ -474,17 +491,15 @@ class PdfProjectService {
   }) {
     final roundedWidth = (pageWidth / _mergeVariability).floor() * _mergeVariability;
     final roundedHeight = (pageHeight / _mergeVariability).floor() * _mergeVariability;
-    final parts = <String>[
-      '奇偶标签：$parityLabel',
-      '尺寸桶：$roundedWidth x $roundedHeight',
-      '版式标签：$layoutLabel',
-      '页数：$pageCount',
-      smartGroupingApplied ? '细分方式：版式指纹智能细分' : '细分方式：仅基础尺寸分组',
-    ];
-    if (containsOutlierPage) {
-      parts.add('特殊说明：该组由离群页自动拆出');
-    }
-    return parts.join('\n');
+    return AppLocalizations.current.groupingReason(
+      parityLabel: parityLabel,
+      layoutLabel: layoutLabel,
+      roundedWidth: roundedWidth,
+      roundedHeight: roundedHeight,
+      pageCount: pageCount,
+      smartGroupingApplied: smartGroupingApplied,
+      containsOutlierPage: containsOutlierPage,
+    );
   }
 
   String _buildManualGroupingReason({
@@ -495,12 +510,12 @@ class PdfProjectService {
   }) {
     final roundedWidth = (pageWidth / _mergeVariability).floor() * _mergeVariability;
     final roundedHeight = (pageHeight / _mergeVariability).floor() * _mergeVariability;
-    return [
-      '奇偶标签：$parityLabel',
-      '尺寸桶：$roundedWidth x $roundedHeight',
-      '页数：$pageCount',
-      '细分方式：手动创建分组',
-    ].join('\n');
+    return AppLocalizations.current.manualGroupingReason(
+      parityLabel: parityLabel,
+      roundedWidth: roundedWidth,
+      roundedHeight: roundedHeight,
+      pageCount: pageCount,
+    );
   }
 }
 

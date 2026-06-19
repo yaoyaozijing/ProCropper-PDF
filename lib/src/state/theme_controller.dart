@@ -30,13 +30,15 @@ class ThemeController extends ChangeNotifier {
     }
   }
 
-  void updateStyleMode(AppStyleMode value) {
-    if (_settings.styleMode == value) {
-      return;
+  Locale? get appLocale {
+    switch (_settings.languageMode) {
+      case AppLanguageMode.system:
+        return null;
+      case AppLanguageMode.zhCn:
+        return const Locale('zh', 'CN');
+      case AppLanguageMode.en:
+        return const Locale('en');
     }
-    _settings = _settings.copyWith(styleMode: value);
-    notifyListeners();
-    unawaited(_settingsService.saveThemeSettings(_settings));
   }
 
   void updateThemeMode(AppThemeMode value) {
@@ -44,6 +46,15 @@ class ThemeController extends ChangeNotifier {
       return;
     }
     _settings = _settings.copyWith(themeMode: value);
+    notifyListeners();
+    unawaited(_settingsService.saveThemeSettings(_settings));
+  }
+
+  void updateLanguageMode(AppLanguageMode value) {
+    if (_settings.languageMode == value) {
+      return;
+    }
+    _settings = _settings.copyWith(languageMode: value);
     notifyListeners();
     unawaited(_settingsService.saveThemeSettings(_settings));
   }
@@ -68,18 +79,18 @@ class ThemeController extends ChangeNotifier {
 
   void updateSettings({
     required AppThemeMode themeMode,
-    required AppStyleMode styleMode,
+    required AppLanguageMode languageMode,
     required AppAccentMode accentMode,
     required bool oledOptimized,
   }) {
     final next = _settings.copyWith(
       themeMode: themeMode,
-      styleMode: styleMode,
+      languageMode: languageMode,
       accentMode: accentMode,
       oledOptimized: oledOptimized,
     );
     if (next.themeMode == _settings.themeMode &&
-        next.styleMode == _settings.styleMode &&
+        next.languageMode == _settings.languageMode &&
         next.accentMode == _settings.accentMode &&
         next.oledOptimized == _settings.oledOptimized) {
       return;
