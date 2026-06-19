@@ -1,7 +1,7 @@
 name: procropper_pdf
 description: "ProCropper PDF，基于 Flutter 的 PDF 裁切工具。"
 publish_to: 'none'
-version: 0.1.0
+version: 0.2.0
 
 environment:
   sdk: ^3.11.5
@@ -35,10 +35,10 @@ msix_config:
   publisher_display_name: 遥遥紫荆
   identity_name: genryopicture.ProCropperPDF
   publisher: CN=F2F54CF4-B104-48F4-AF36-4351B9E66834
-  msix_version: 0.1.0.0
+  msix_version: 0.2.0.0
   logo_path: assets/branding/app_icon/app_icon_1024.png
   architecture: x64
-  capabilities: internetClient
+  languages: en-us, zh-cn
   file_extension: .pdf
 
 flutter:
