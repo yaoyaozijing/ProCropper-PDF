@@ -809,7 +809,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                   child: LinearProgressIndicator(value: progress),
                 ),
               ],
-              if (isDone && !Platform.isAndroid) ...[
+              if (isDone && Platform.isWindows) ...[
                 const SizedBox(height: 14),
                 Row(
                   children: [
@@ -1648,14 +1648,14 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         await Process.run('explorer.exe', [directoryPath]);
         return;
       }
-      if (Platform.isMacOS) {
-        await Process.run('open', [directoryPath]);
-        return;
-      }
-      if (Platform.isLinux) {
-        await Process.run('xdg-open', [directoryPath]);
-        return;
-      }
+      // if (Platform.isMacOS) {
+      //   await Process.run('open', [directoryPath]);
+      //   return;
+      // }
+      // if (Platform.isLinux) {
+      //   await Process.run('xdg-open', [directoryPath]);
+      //   return;
+      // }
       _showMessage(context.l10n.openDirectoryUnsupported);
     } catch (error) {
       if (!mounted) {

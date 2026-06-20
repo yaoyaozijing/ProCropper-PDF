@@ -28,6 +28,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   msix: ^3.17.0
+  flutter_launcher_icons: ^0.14.4
 
 msix_config:
   store: true
@@ -40,6 +41,19 @@ msix_config:
   architecture: x64
   languages: en-us, zh-cn
   file_extension: .pdf
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/branding/app_icon/app_icon_1024.png"
+  min_sdk_android: 21
+  windows:
+    generate: true
+    image_path: "assets/branding/app_icon/app_icon_1024.png"
+    icon_size: 96
+  macos:
+    generate: true
+    image_path: "assets/branding/app_icon/app_icon_1024.png"
 
 flutter:
   uses-material-design: true
