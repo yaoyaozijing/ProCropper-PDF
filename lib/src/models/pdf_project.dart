@@ -1,3 +1,4 @@
+import 'package:flutter/painting.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import 'cluster_settings.dart';
@@ -20,5 +21,9 @@ class PdfProject {
   final int pageCount;
   final ClusterSettings settings;
 
-  Future<void> dispose() => document.dispose();
+  Future<void> dispose() async {
+    await document.dispose();
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+  }
 }

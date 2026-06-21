@@ -65,6 +65,7 @@ class PdfEditorController extends ChangeNotifier {
   }) async {
     await _runBusy(_l10n.loadingPdf, () async {
       final previousProject = _project;
+      _resetTransientState();
       _project = null;
       notifyListeners();
       await previousProject?.dispose();
@@ -480,9 +481,20 @@ class PdfEditorController extends ChangeNotifier {
 
   Future<void> disposeProject() async {
     final current = _project;
+    _resetTransientState();
     _project = null;
     notifyListeners();
     await current?.dispose();
+  }
+
+  void _resetTransientState() {
+    _selectedClusterIndex = 0;
+    _selectedRectIndex = 0;
+    _clipboard = null;
+    _lastExportPath = null;
+    _lastExportError = null;
+    _exportProgress = null;
+    _exportStatus = null;
   }
 
   void _replaceCluster(PageCluster updatedCluster) {

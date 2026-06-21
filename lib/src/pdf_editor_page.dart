@@ -877,7 +877,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         ],
         FilledButton.icon(
           onPressed: enabled ? _savePdf : null,
-          icon: const Icon(Icons.save_alt_rounded),
+          icon: const Icon(Icons.save_rounded),
           label: Text(l10n.save),
         ),
       ],
@@ -929,7 +929,6 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
       ShareParams(
         files: [XFile(filePath, mimeType: 'application/pdf')],
         title: _suggestedOutputFileName(),
-        text: _suggestedOutputFileName(),
         sharePositionOrigin: origin,
       ),
     );

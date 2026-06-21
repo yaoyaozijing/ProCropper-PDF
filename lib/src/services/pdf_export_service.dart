@@ -182,11 +182,13 @@ Future<void> _runExportInIsolate(Map<String, Object?> request) async {
     'message': AppLocalizations.current.readingSourceFile,
   });
 
-  final sourceBytes = await File(sourcePath).readAsBytes();
-  final sourceDocument = PdfDocument(inputBytes: sourceBytes);
-  final outputDocument = PdfDocument();
+  PdfDocument? sourceDocument;
+  PdfDocument? outputDocument;
 
   try {
+    final sourceBytes = await File(sourcePath).readAsBytes();
+    sourceDocument = PdfDocument(inputBytes: sourceBytes);
+    outputDocument = PdfDocument();
     outputDocument.pageSettings.margins.all = 0;
     final pageCount = sourceDocument.pages.count;
     for (var index = 0; index < pageCount; index++) {
@@ -220,18 +222,25 @@ Future<void> _runExportInIsolate(Map<String, Object?> request) async {
       });
     }
 
+    pageCropMap.clear();
+    sourceDocument.dispose();
+    sourceDocument = null;
+
     replyPort.send({
       'type': 'progress',
       'progress': 0.96,
       'message': AppLocalizations.current.generatingExportFile,
     });
-    final bytes = await outputDocument.save();
+    Uint8List bytes = await outputDocument.saveAsBytes();
+    outputDocument.dispose();
+    outputDocument = null;
     replyPort.send({
       'type': 'progress',
       'progress': 0.99,
       'message': AppLocalizations.current.writingToDisk,
     });
     await File(outputPath).writeAsBytes(bytes, flush: true);
+    bytes = Uint8List(0);
     replyPort.send({
       'type': 'done',
       'outputPath': outputPath,
@@ -243,8 +252,8 @@ Future<void> _runExportInIsolate(Map<String, Object?> request) async {
       'stackTrace': stackTrace.toString(),
     });
   } finally {
-    sourceDocument.dispose();
-    outputDocument.dispose();
+    sourceDocument?.dispose();
+    outputDocument?.dispose();
   }
 }
 
