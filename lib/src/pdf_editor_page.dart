@@ -33,6 +33,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   final CropViewportController _viewportController = CropViewportController();
   final TextEditingController _locatePageController = TextEditingController();
   final FocusNode _locatePageFocusNode = FocusNode();
+  final GlobalKey _shareButtonKey = GlobalKey();
+  final GlobalKey _toolMenuButtonKey = GlobalKey();
   static const double _clusterPanelWidth = 350;
   static const double _toolPanelWidth = 188;
   String? _statusMessage;
@@ -235,6 +237,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     final l10n = context.l10n;
     if (!isCompact) {
       return IconButton(
+        key: _toolMenuButtonKey,
         tooltip: _showToolPanel ? l10n.collapseToolbar : l10n.expandToolbar,
         onPressed: _toggleToolPanel,
         icon: const Icon(Icons.info),
@@ -242,6 +245,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     }
 
     return PopupMenuButton<_CompactToolbarAction>(
+      key: _toolMenuButtonKey,
       tooltip: l10n.toolMenu,
       icon: const Icon(Icons.info),
       onSelected: _handleCompactToolbarAction,
@@ -865,6 +869,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         if (!isCompact) ...[
           OutlinedButton.icon(
             onPressed: enabled ? _sharePdf : null,
+            key: _shareButtonKey,
             icon: const Icon(Icons.share_outlined),
             label: Text(l10n.share),
           ),
@@ -916,10 +921,10 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   }
 
   Future<void> _shareExportedPdf(String filePath) async {
-    final renderBox = context.findRenderObject() as RenderBox?;
-    final origin = renderBox == null
-        ? null
-        : renderBox.localToGlobal(Offset.zero) & renderBox.size;
+    final origin =
+        _resolveShareOrigin(_shareButtonKey) ??
+        _resolveShareOrigin(_toolMenuButtonKey) ??
+        _resolveShareOriginFromContext();
     await SharePlus.instance.share(
       ShareParams(
         files: [XFile(filePath, mimeType: 'application/pdf')],
@@ -928,6 +933,28 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         sharePositionOrigin: origin,
       ),
     );
+  }
+
+  Rect? _resolveShareOrigin(GlobalKey key) {
+    final context = key.currentContext;
+    if (context == null) {
+      return null;
+    }
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) {
+      return null;
+    }
+    final offset = renderObject.localToGlobal(Offset.zero);
+    return offset & renderObject.size;
+  }
+
+  Rect? _resolveShareOriginFromContext() {
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) {
+      return null;
+    }
+    final offset = renderObject.localToGlobal(Offset.zero);
+    return offset & renderObject.size;
   }
 
   Future<String?> _resolveSaveDestination() async {
