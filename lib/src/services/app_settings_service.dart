@@ -40,6 +40,7 @@ class AppSettingsService {
     final oledOptimized = raw['oledOptimized'] as bool?;
     final eInkOptimized = raw['eInkOptimized'] as bool?;
     final multiWindowMode = raw['multiWindowMode'] as bool?;
+    final windowsMicaEnabled = raw['windowsMicaEnabled'] as bool?;
 
     return AppThemeSettings(
       themeMode: themeModeIndex != null &&
@@ -60,6 +61,7 @@ class AppSettingsService {
       oledOptimized: oledOptimized ?? false,
       eInkOptimized: eInkOptimized ?? false,
       multiWindowMode: multiWindowMode ?? false,
+      windowsMicaEnabled: windowsMicaEnabled ?? false,
     );
   }
 
@@ -71,6 +73,7 @@ class AppSettingsService {
       'oledOptimized': settings.oledOptimized,
       'eInkOptimized': settings.eInkOptimized,
       'multiWindowMode': settings.multiWindowMode,
+      'windowsMicaEnabled': settings.windowsMicaEnabled,
     });
   }
 

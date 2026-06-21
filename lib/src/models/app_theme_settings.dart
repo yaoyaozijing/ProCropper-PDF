@@ -31,6 +31,7 @@ class AppThemeSettings {
     this.oledOptimized = false,
     this.eInkOptimized = false,
     this.multiWindowMode = false,
+    this.windowsMicaEnabled = false,
   });
 
   final AppThemeMode themeMode;
@@ -39,6 +40,7 @@ class AppThemeSettings {
   final bool oledOptimized;
   final bool eInkOptimized;
   final bool multiWindowMode;
+  final bool windowsMicaEnabled;
 
   AppThemeSettings copyWith({
     AppThemeMode? themeMode,
@@ -47,6 +49,7 @@ class AppThemeSettings {
     bool? oledOptimized,
     bool? eInkOptimized,
     bool? multiWindowMode,
+    bool? windowsMicaEnabled,
   }) {
     return AppThemeSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -55,6 +58,7 @@ class AppThemeSettings {
       oledOptimized: oledOptimized ?? this.oledOptimized,
       eInkOptimized: eInkOptimized ?? this.eInkOptimized,
       multiWindowMode: multiWindowMode ?? this.multiWindowMode,
+      windowsMicaEnabled: windowsMicaEnabled ?? this.windowsMicaEnabled,
     );
   }
 }

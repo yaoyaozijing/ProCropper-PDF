@@ -7,6 +7,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'l10n/app_localizations.dart';
 import 'models/app_theme_settings.dart';
 import 'pdf_crop_app.dart';
+import 'services/window_effect_service.dart';
 import 'services/windowing_service.dart';
 import 'state/theme_controller.dart';
 
@@ -25,6 +26,18 @@ class ProCropperPdfApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: themeController,
       builder: (context, child) {
+        final platformBrightness =
+            View.of(context).platformDispatcher.platformBrightness;
+        final materialThemeMode = themeController.materialThemeMode;
+        final effectiveBrightness = switch (materialThemeMode) {
+          ThemeMode.system => platformBrightness,
+          ThemeMode.light => Brightness.light,
+          ThemeMode.dark => Brightness.dark,
+        };
+        _scheduleWindowEffectSync(
+          settings: themeController.settings,
+          platformBrightness: platformBrightness,
+        );
         return wrapWithWindowManager(
           MaterialApp(
             title: 'ProCropper PDF',
@@ -63,11 +76,15 @@ class ProCropperPdfApp extends StatelessWidget {
             builder: (context, child) {
               final content = child ?? const SizedBox.shrink();
               if (!Platform.isMacOS) {
-                return content;
+                return _wrapWindowsMicaSurface(
+                  content: content,
+                  settings: themeController.settings,
+                  effectiveBrightness: effectiveBrightness,
+                );
               }
               final mediaQuery = MediaQuery.of(context);
               final topInset = math.max(28.0, mediaQuery.viewPadding.top);
-              return MediaQuery(
+              final macosContent = MediaQuery(
                 data: mediaQuery.copyWith(
                   padding: EdgeInsets.fromLTRB(
                     mediaQuery.padding.left,
@@ -83,6 +100,11 @@ class ProCropperPdfApp extends StatelessWidget {
                   ),
                 ),
                 child: content,
+              );
+              return _wrapWindowsMicaSurface(
+                content: macosContent,
+                settings: themeController.settings,
+                effectiveBrightness: effectiveBrightness,
               );
             },
             home: PdfCropApp(
@@ -110,6 +132,10 @@ class ProCropperPdfApp extends StatelessWidget {
     );
     final oledOptimized =
         brightness == Brightness.dark && settings.oledOptimized;
+    final windowsMicaActive =
+        Platform.isWindows &&
+        settings.windowsMicaEnabled &&
+        !(brightness == Brightness.light && settings.eInkOptimized);
     final colorScheme = eInkOptimized
         ? baseColorScheme.copyWith(
             primary: Colors.black,
@@ -150,12 +176,25 @@ class ProCropperPdfApp extends StatelessWidget {
             surfaceContainerHigh: const Color(0xFF101010),
             surfaceContainerHighest: const Color(0xFF181818),
           )
+        : windowsMicaActive
+        ? baseColorScheme.copyWith(
+            surface: Colors.transparent,
+            surfaceDim: const Color(0x00FFFFFF),
+            surfaceBright: const Color(0x00FFFFFF),
+            surfaceContainerLowest: Colors.transparent,
+            surfaceContainerLow: _micaTint(brightness, 0.54),
+            surfaceContainer: _micaTint(brightness, 0.64),
+            surfaceContainerHigh: _micaTint(brightness, 0.74),
+            surfaceContainerHighest: _micaTint(brightness, 0.82),
+          )
         : baseColorScheme;
     return ThemeData(
       colorScheme: colorScheme,
       useMaterial3: true,
-      scaffoldBackgroundColor: colorScheme.surface,
-      canvasColor: colorScheme.surface,
+      scaffoldBackgroundColor: windowsMicaActive
+          ? Colors.transparent
+          : colorScheme.surface,
+      canvasColor: windowsMicaActive ? Colors.transparent : colorScheme.surface,
       dialogTheme: DialogThemeData(
         backgroundColor: colorScheme.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
@@ -232,6 +271,49 @@ class ProCropperPdfApp extends StatelessWidget {
       case AppAccentMode.graphite:
         return const Color(0xFF4A5568);
     }
+  }
+
+  void _scheduleWindowEffectSync({
+    required AppThemeSettings settings,
+    required Brightness platformBrightness,
+  }) {
+    if (!Platform.isWindows) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WindowEffectService.instance.sync(
+        settings,
+        platformBrightness: platformBrightness,
+      );
+    });
+  }
+
+  Widget _wrapWindowsMicaSurface({
+    required Widget content,
+    required AppThemeSettings settings,
+    required Brightness effectiveBrightness,
+  }) {
+    final micaActive =
+        Platform.isWindows &&
+        settings.windowsMicaEnabled &&
+        !(settings.eInkOptimized && effectiveBrightness == Brightness.light);
+    if (!micaActive) {
+      return content;
+    }
+    final overlayColor = effectiveBrightness == Brightness.dark
+        ? const Color(0x66101010)
+        : const Color(0x33FFFFFF);
+    return ColoredBox(
+      color: overlayColor,
+      child: content,
+    );
+  }
+
+  Color _micaTint(Brightness brightness, double opacity) {
+    final base = brightness == Brightness.dark
+        ? const Color(0xFF181818)
+        : const Color(0xFFF7F7F7);
+    return base.withValues(alpha: opacity);
   }
 }
 

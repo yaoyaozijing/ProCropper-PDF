@@ -23,10 +23,12 @@ import 'widgets/windows_window_controls.dart';
 class PdfEditorPage extends StatefulWidget {
   const PdfEditorPage({
     required this.controller,
+    this.disablePanelTransparency = false,
     super.key,
   });
 
   final PdfEditorController controller;
+  final bool disablePanelTransparency;
 
   @override
   State<PdfEditorPage> createState() => _PdfEditorPageState();
@@ -359,6 +361,7 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                 pageLabel: _formatPageRanges(item.pages),
                 selected: index == _controller.selectedClusterIndex,
                 multiSelected: _selectedClusterIndices.contains(index),
+                disableTransparency: widget.disablePanelTransparency,
                 onTap: () {
                   _controller.selectCluster(index);
                   onClusterSelected?.call();
@@ -692,10 +695,12 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
   Widget _buildFloatingPanel({required Widget child}) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final panelColor = Color.alphaBlend(
-      colorScheme.surface.withValues(alpha: 0.78),
-      colorScheme.surfaceContainerLow.withValues(alpha: 0.72),
-    );
+    final panelColor = widget.disablePanelTransparency
+        ? colorScheme.surfaceContainerLow
+        : Color.alphaBlend(
+            colorScheme.surface.withValues(alpha: 0.78),
+            colorScheme.surfaceContainerLow.withValues(alpha: 0.72),
+          );
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
@@ -1855,6 +1860,7 @@ class _ClusterTile extends StatelessWidget {
     required this.pageLabel,
     required this.selected,
     required this.multiSelected,
+    required this.disableTransparency,
     required this.onTap,
     required this.onCheckChanged,
   });
@@ -1863,6 +1869,7 @@ class _ClusterTile extends StatelessWidget {
   final String pageLabel;
   final bool selected;
   final bool multiSelected;
+  final bool disableTransparency;
   final VoidCallback onTap;
   final ValueChanged<bool?> onCheckChanged;
 
@@ -1872,8 +1879,12 @@ class _ClusterTile extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     return Card(
       color: selected
-          ? colorScheme.primaryContainer.withValues(alpha: 0.72)
-          : Theme.of(context).cardColor,
+          ? (disableTransparency
+                ? colorScheme.primaryContainer
+                : colorScheme.primaryContainer.withValues(alpha: 0.72))
+          : (disableTransparency
+                ? colorScheme.surfaceContainerLow
+                : Theme.of(context).cardColor),
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),

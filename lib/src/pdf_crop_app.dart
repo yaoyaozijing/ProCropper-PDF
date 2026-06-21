@@ -9,6 +9,7 @@ import 'package:pdfrx/pdfrx.dart';
 
 import 'l10n/app_localizations.dart';
 import 'models/app_grouping_settings.dart';
+import 'models/app_theme_settings.dart';
 import 'models/cluster_settings.dart';
 import 'pdf_editor_page.dart';
 import 'services/android_incoming_pdf_service.dart';
@@ -523,6 +524,7 @@ class _PdfCropAppState extends State<PdfCropApp> {
           },
           builder: (context) => PdfEditorPage(
             controller: windowController,
+            disablePanelTransparency: _shouldDisableEditorPanelTransparency(),
           ),
         );
         if (opened) {
@@ -552,6 +554,7 @@ class _PdfCropAppState extends State<PdfCropApp> {
       MaterialPageRoute<void>(
         builder: (context) => PdfEditorPage(
           controller: _controller,
+          disablePanelTransparency: _shouldDisableEditorPanelTransparency(),
         ),
       ),
     );
@@ -755,5 +758,21 @@ class _PdfCropAppState extends State<PdfCropApp> {
     setState(() {
       _statusMessage = null;
     });
+  }
+
+  bool _shouldDisableEditorPanelTransparency() {
+    if (!Platform.isWindows) {
+      return false;
+    }
+    final settings = widget.themeController.settings;
+    final brightness = switch (settings.themeMode) {
+      AppThemeMode.system =>
+        View.of(context).platformDispatcher.platformBrightness,
+      AppThemeMode.light => Brightness.light,
+      AppThemeMode.dark => Brightness.dark,
+    };
+    final eInkActive =
+        settings.eInkOptimized && brightness == Brightness.light;
+    return settings.windowsMicaEnabled && !eInkActive;
   }
 }

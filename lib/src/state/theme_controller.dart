@@ -95,6 +95,15 @@ class ThemeController extends ChangeNotifier {
     unawaited(_settingsService.saveThemeSettings(_settings));
   }
 
+  void updateWindowsMicaEnabled(bool value) {
+    if (_settings.windowsMicaEnabled == value) {
+      return;
+    }
+    _settings = _settings.copyWith(windowsMicaEnabled: value);
+    notifyListeners();
+    unawaited(_settingsService.saveThemeSettings(_settings));
+  }
+
   void updateSettings({
     required AppThemeMode themeMode,
     required AppLanguageMode languageMode,
@@ -102,6 +111,7 @@ class ThemeController extends ChangeNotifier {
     required bool oledOptimized,
     required bool eInkOptimized,
     required bool multiWindowMode,
+    required bool windowsMicaEnabled,
   }) {
     final next = _settings.copyWith(
       themeMode: themeMode,
@@ -110,13 +120,15 @@ class ThemeController extends ChangeNotifier {
       oledOptimized: oledOptimized,
       eInkOptimized: eInkOptimized,
       multiWindowMode: multiWindowMode,
+      windowsMicaEnabled: windowsMicaEnabled,
     );
     if (next.themeMode == _settings.themeMode &&
         next.languageMode == _settings.languageMode &&
         next.accentMode == _settings.accentMode &&
         next.oledOptimized == _settings.oledOptimized &&
         next.eInkOptimized == _settings.eInkOptimized &&
-        next.multiWindowMode == _settings.multiWindowMode) {
+        next.multiWindowMode == _settings.multiWindowMode &&
+        next.windowsMicaEnabled == _settings.windowsMicaEnabled) {
       return;
     }
     _settings = next;

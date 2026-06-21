@@ -350,6 +350,11 @@ class AppLocalizations {
   String get eInkOnlyInLight => isZh
       ? '仅在浅色主题下生效，会关闭动画并切换为白底黑色主题。'
       : 'Only takes effect in light mode. Disables animations and switches to a white background with pure black accents.';
+  String get enableWindowsMica =>
+      isZh ? 'Windows Mica 背景' : 'Windows Mica Background';
+  String get windowsMicaDescription => isZh
+      ? '仅在 Windows 上生效。开启后使用系统 Mica 材质作为窗口背景。'
+      : 'Windows only. Uses the system Mica material as the window background when enabled.';
   String get multiWindowMode => isZh ? '多窗口模式' : 'Multi-Window Mode';
   String get enableMultiWindowMode =>
       isZh ? '启用多窗口模式' : 'Enable Multi-Window Mode';

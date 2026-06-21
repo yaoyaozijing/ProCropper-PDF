@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:settings_ui/settings_ui.dart';
@@ -163,6 +165,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 description: Text(l10n.eInkOnlyInLight),
                 onToggle: widget.themeController.updateEInkOptimized,
               ),
+              if (Platform.isWindows)
+                SettingsTile.switchTile(
+                  initialValue:
+                      widget.themeController.settings.windowsMicaEnabled,
+                  leading: const Icon(Icons.blur_on_rounded),
+                  title: Text(l10n.enableWindowsMica),
+                  description: Text(l10n.windowsMicaDescription),
+                  onToggle: widget.themeController.updateWindowsMicaEnabled,
+                ),
               if (isFlutterWindowingAvailable)
                 SettingsTile.switchTile(
                   initialValue: widget.themeController.settings.multiWindowMode,
