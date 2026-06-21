@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
+import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -17,9 +18,11 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val createDocumentRequestCode = 41021
+    private val openDocumentTreeRequestCode = 41022
     private val documentsChannelName = "procropper_pdf/android_documents"
     private val incomingPdfChannelName = "procropper_pdf/android_incoming_pdf"
     private var pendingResult: MethodChannel.Result? = null
+    private var pendingRequestCode: Int? = null
     private var pendingIncomingPdfPath: String? = null
     private var incomingPdfChannel: MethodChannel? = null
 
@@ -35,7 +38,11 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "createDocument" -> handleCreateDocument(call, result)
+                    "pickDirectoryTree" -> handlePickDirectoryTree(result)
+                    "listPdfFilesInTree" -> handleListPdfFilesInTree(call, result)
+                    "copyTreeFileToCache" -> handleCopyTreeFileToCache(call, result)
                     "writeDocumentFromPath" -> handleWriteDocumentFromPath(call, result)
+                    "writeFileToTree" -> handleWriteFileToTree(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -84,7 +91,79 @@ class MainActivity : FlutterActivity() {
         }
 
         pendingResult = result
+        pendingRequestCode = createDocumentRequestCode
         startActivityForResult(intent, createDocumentRequestCode)
+    }
+
+    private fun handlePickDirectoryTree(result: MethodChannel.Result) {
+        if (pendingResult != null) {
+            result.error("busy", "A document picker request is already in progress.", null)
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        }
+
+        pendingResult = result
+        pendingRequestCode = openDocumentTreeRequestCode
+        startActivityForResult(intent, openDocumentTreeRequestCode)
+    }
+
+    private fun handleListPdfFilesInTree(call: MethodCall, result: MethodChannel.Result) {
+        val treeUriString = call.argument<String>("treeUri")
+        val recursive = call.argument<Boolean>("recursive") ?: false
+        if (treeUriString.isNullOrBlank()) {
+            result.error("invalid_args", "treeUri is required.", null)
+            return
+        }
+
+        try {
+            val treeUri = Uri.parse(treeUriString)
+            contentResolver.takePersistableUriPermissionIfSupported(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+            val root = DocumentFile.fromTreeUri(this, treeUri)
+            if (root == null || !root.isDirectory) {
+                result.error("tree_invalid", "Unable to open selected folder.", null)
+                return
+            }
+            val files = mutableListOf<Map<String, String>>()
+            collectPdfFiles(root, "", recursive, files)
+            result.success(files)
+        } catch (e: Exception) {
+            result.error("list_failed", e.message, null)
+        }
+    }
+
+    private fun handleCopyTreeFileToCache(call: MethodCall, result: MethodChannel.Result) {
+        val uriString = call.argument<String>("uri")
+        val fileNameArg = call.argument<String>("fileName")
+        if (uriString.isNullOrBlank()) {
+            result.error("invalid_args", "uri is required.", null)
+            return
+        }
+
+        try {
+            val uri = Uri.parse(uriString)
+            contentResolver.takePersistableUriPermissionIfSupported(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+            val cachedPath = copyUriToCache(
+                uri = uri,
+                preferredFileName = fileNameArg,
+                subdirectory = "batch_inputs",
+            )
+            result.success(cachedPath)
+        } catch (e: Exception) {
+            result.error("copy_failed", e.message, null)
+        }
     }
 
     private fun handleWriteDocumentFromPath(call: MethodCall, result: MethodChannel.Result) {
@@ -112,16 +191,69 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun handleWriteFileToTree(call: MethodCall, result: MethodChannel.Result) {
+        val treeUriString = call.argument<String>("treeUri")
+        val relativeDirectory = call.argument<String>("relativeDirectory") ?: ""
+        val fileName = call.argument<String>("fileName")
+        val sourcePath = call.argument<String>("sourcePath")
+
+        if (treeUriString.isNullOrBlank() || fileName.isNullOrBlank() || sourcePath.isNullOrBlank()) {
+            result.error(
+                "invalid_args",
+                "treeUri, fileName and sourcePath are required.",
+                null,
+            )
+            return
+        }
+
+        try {
+            val treeUri = Uri.parse(treeUriString)
+            contentResolver.takePersistableUriPermissionIfSupported(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+            val root = DocumentFile.fromTreeUri(this, treeUri)
+            if (root == null || !root.isDirectory) {
+                result.error("tree_invalid", "Unable to open selected output folder.", null)
+                return
+            }
+
+            val targetDirectory = ensureRelativeDirectory(root, relativeDirectory)
+            val existing = targetDirectory.findFile(fileName)
+            existing?.delete()
+            val targetFile = targetDirectory.createFile("application/pdf", fileName)
+            if (targetFile == null) {
+                result.error("create_failed", "Unable to create destination file.", null)
+                return
+            }
+
+            contentResolver.openOutputStream(targetFile.uri, "w")?.use { output ->
+                FileInputStream(sourcePath).use { input ->
+                    input.copyTo(output)
+                }
+            } ?: run {
+                result.error("open_failed", "Unable to open destination document.", null)
+                return
+            }
+            result.success(targetFile.uri.toString())
+        } catch (e: Exception) {
+            result.error("write_failed", e.message, null)
+        }
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 
-        if (requestCode != createDocumentRequestCode) {
+        val expectedRequestCode = pendingRequestCode
+        if (requestCode != expectedRequestCode) {
             return
         }
 
         val callback = pendingResult
         pendingResult = null
+        pendingRequestCode = null
         if (callback == null) {
             return
         }
@@ -172,26 +304,41 @@ class MainActivity : FlutterActivity() {
 
         return try {
             contentResolver.takePersistableUriPermissionIfSupported(uri)
-            val fileName = buildIncomingFileName(uri)
-            val incomingDir = File(cacheDir, "incoming_pdfs").apply {
-                if (!exists()) {
-                    mkdirs()
-                }
-            }
-            val targetFile = File(incomingDir, "${System.currentTimeMillis()}_$fileName")
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output)
-                }
-            } ?: return null
-            targetFile.absolutePath
+            copyUriToCache(
+                uri = uri,
+                preferredFileName = null,
+                subdirectory = "incoming_pdfs",
+            )
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun buildIncomingFileName(uri: Uri): String {
-        val candidate = uri.lastPathSegment
+    private fun copyUriToCache(
+        uri: Uri,
+        preferredFileName: String?,
+        subdirectory: String,
+    ): String? {
+        val fileName = buildIncomingFileName(uri, preferredFileName)
+        val incomingDir = File(cacheDir, subdirectory).apply {
+            if (!exists()) {
+                mkdirs()
+            }
+        }
+        val targetFile = File(incomingDir, "${System.currentTimeMillis()}_$fileName")
+        contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(targetFile).use { output ->
+                input.copyTo(output)
+            }
+        } ?: return null
+        return targetFile.absolutePath
+    }
+
+    private fun buildIncomingFileName(uri: Uri, preferredFileName: String? = null): String {
+        val candidate = preferredFileName
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: uri.lastPathSegment
             ?.substringAfterLast('/')
             ?.substringAfterLast(':')
             ?.trim()
@@ -204,15 +351,73 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun ContentResolver.takePersistableUriPermissionIfSupported(uri: Uri) {
+    private fun collectPdfFiles(
+        directory: DocumentFile,
+        relativeDirectory: String,
+        recursive: Boolean,
+        output: MutableList<Map<String, String>>,
+    ) {
+        for (child in directory.listFiles()) {
+            if (child.isDirectory) {
+                if (!recursive) {
+                    continue
+                }
+                val childName = child.name?.trim().orEmpty()
+                if (childName.isEmpty()) {
+                    continue
+                }
+                val nextRelativeDirectory = if (relativeDirectory.isEmpty()) {
+                    childName
+                } else {
+                    "$relativeDirectory/$childName"
+                }
+                collectPdfFiles(child, nextRelativeDirectory, recursive, output)
+                continue
+            }
+            if (!child.isFile) {
+                continue
+            }
+            val name = child.name?.trim().orEmpty()
+            if (!name.lowercase().endsWith(".pdf")) {
+                continue
+            }
+            output.add(
+                mapOf(
+                    "uri" to child.uri.toString(),
+                    "name" to name,
+                    "relativeDirectory" to relativeDirectory,
+                ),
+            )
+        }
+    }
+
+    private fun ensureRelativeDirectory(root: DocumentFile, relativeDirectory: String): DocumentFile {
+        var current = root
+        val normalized = relativeDirectory
+            .replace('\\', '/')
+            .split('/')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != "." }
+        for (segment in normalized) {
+            val existing = current.findFile(segment)
+            current = when {
+                existing != null && existing.isDirectory -> existing
+                else -> current.createDirectory(segment)
+                    ?: throw IllegalStateException("Unable to create directory: $segment")
+            }
+        }
+        return current
+    }
+
+    private fun ContentResolver.takePersistableUriPermissionIfSupported(
+        uri: Uri,
+        flags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION,
+    ) {
         if (uri.scheme != ContentResolver.SCHEME_CONTENT) {
             return
         }
         try {
-            takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
+            takePersistableUriPermission(uri, flags)
         } catch (_: SecurityException) {
             // Some providers don't grant persistable permissions; ignore.
         } catch (_: IllegalArgumentException) {

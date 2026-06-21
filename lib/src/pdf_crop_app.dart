@@ -13,6 +13,7 @@ import 'models/app_theme_settings.dart';
 import 'models/cluster_settings.dart';
 import 'pdf_editor_page.dart';
 import 'services/android_incoming_pdf_service.dart';
+import 'services/android_document_tree_service.dart';
 import 'services/app_settings_service.dart';
 import 'services/cache_service.dart';
 import 'services/windowing_service.dart';
@@ -40,6 +41,7 @@ class _PdfCropAppState extends State<PdfCropApp> {
   late final PdfEditorController _controller;
   late final AppSettingsService _appSettingsService;
   late final AndroidIncomingPdfService _incomingPdfService;
+  late final AndroidDocumentTreeService _androidDocumentTreeService;
   late final CacheService _cacheService;
   bool _draggingPdf = false;
   bool _handledInitialPdf = false;
@@ -53,6 +55,7 @@ class _PdfCropAppState extends State<PdfCropApp> {
       defaultTargetPlatform != TargetPlatform.android &&
       defaultTargetPlatform != TargetPlatform.iOS;
   bool get _supportsBatchCrop =>
+      defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.macOS ||
       defaultTargetPlatform == TargetPlatform.linux;
@@ -63,6 +66,7 @@ class _PdfCropAppState extends State<PdfCropApp> {
     _controller = PdfEditorController();
     _appSettingsService = AppSettingsService();
     _incomingPdfService = AndroidIncomingPdfService();
+    _androidDocumentTreeService = AndroidDocumentTreeService();
     _cacheService = CacheService();
     _controller.addListener(_onControllerChanged);
     _loadGroupingSettings();
@@ -325,7 +329,12 @@ class _PdfCropAppState extends State<PdfCropApp> {
   Future<void> _runBatchCrop() async {
     final l10n = context.l10n;
     if (!_supportsBatchCrop) {
-      _showMessage(l10n.batchCropDesktopOnly);
+      _showMessage(l10n.batchCropUnsupported);
+      return;
+    }
+
+    if (Platform.isAndroid) {
+      await _runAndroidBatchCrop();
       return;
     }
 
@@ -472,6 +481,206 @@ class _PdfCropAppState extends State<PdfCropApp> {
         });
       }
     }
+  }
+
+  Future<void> _runAndroidBatchCrop() async {
+    final l10n = context.l10n;
+    final confirmedInput = await _showBatchDirectoryPrompt(
+      title: l10n.batchInputDirectoryPromptTitle,
+      description: l10n.batchInputDirectoryPromptDescription,
+    );
+    if (confirmedInput != true) {
+      return;
+    }
+
+    final inputTreeUri = await _androidDocumentTreeService.pickDirectoryTree();
+    if (inputTreeUri == null || inputTreeUri.isEmpty) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    final confirmedOutput = await _showBatchDirectoryPrompt(
+      title: l10n.batchOutputDirectoryPromptTitle,
+      description: l10n.batchOutputDirectoryPromptDescription,
+    );
+    if (confirmedOutput != true) {
+      return;
+    }
+
+    final outputTreeUri = await _androidDocumentTreeService.pickDirectoryTree();
+    if (outputTreeUri == null || outputTreeUri.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _isBatchCropping = true;
+      _batchProgress = null;
+      _batchStatus = l10n.batchPreparing;
+      _statusMessage = null;
+    });
+
+    try {
+      setState(() {
+        _batchStatus = l10n.batchScanningDirectory(l10n.selectBatchInputDirectory);
+      });
+
+      final pdfFiles = await _androidDocumentTreeService.listPdfFilesInTree(
+        treeUri: inputTreeUri,
+        recursive: _groupingSettings.batchCropRecursive,
+      );
+
+      if (pdfFiles.isEmpty) {
+        _showMessage(l10n.batchNoPdfFound(l10n.selectBatchInputDirectory));
+        return;
+      }
+
+      final sortedFiles = [...pdfFiles]
+        ..sort((a, b) {
+          final aPath = '${a.relativeDirectory}/${a.fileName}'.toLowerCase();
+          final bPath = '${b.relativeDirectory}/${b.fileName}'.toLowerCase();
+          return aPath.compareTo(bPath);
+        });
+
+      var successCount = 0;
+      final failures = <String>[];
+
+      for (var index = 0; index < sortedFiles.length; index++) {
+        final file = sortedFiles[index];
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _batchProgress = index / sortedFiles.length;
+          _batchStatus = l10n.batchProcessingFile(
+            index + 1,
+            sortedFiles.length,
+            file.fileName,
+          );
+        });
+
+        final cachedInputPath = await _androidDocumentTreeService.copyTreeFileToCache(
+          documentUri: file.uri,
+          fileName: file.fileName,
+        );
+        if (cachedInputPath == null || cachedInputPath.isEmpty) {
+          failures.add('${file.fileName}: ${l10n.batchFailedToReadSourceFile}');
+          continue;
+        }
+
+        final batchController = PdfEditorController();
+        String? temporaryExportPath;
+        try {
+          await batchController.openFile(
+            cachedInputPath,
+            initialSettings: ClusterSettings(
+              smartGroupingLevel: _groupingSettings.defaultSmartGroupingLevel,
+              separateOddEven: _groupingSettings.defaultSeparateOddEven,
+            ),
+            passwordProvider: _buildPasswordProvider(
+              cachedInputPath,
+              dialogTitle: l10n.batchPasswordPromptTitle(file.fileName),
+            ),
+          );
+          temporaryExportPath = await batchController.createTemporaryExportPath();
+          if (temporaryExportPath == null || temporaryExportPath.isEmpty) {
+            throw StateError('Failed to create temporary export path.');
+          }
+          await batchController.export(destinationPath: temporaryExportPath);
+          await _androidDocumentTreeService.writeFileToTree(
+            treeUri: outputTreeUri,
+            relativeDirectory: file.relativeDirectory,
+            fileName: _suggestedOutputFileName(file.fileName),
+            sourcePath: temporaryExportPath,
+          );
+          successCount++;
+        } catch (error) {
+          failures.add('${file.fileName}: ${_normalizeBatchFailure(error)}');
+        } finally {
+          if (temporaryExportPath != null) {
+            try {
+              await batchController.deleteTemporaryExport(temporaryExportPath);
+            } catch (_) {
+              // Ignore per-file temp export cleanup failure.
+            }
+          }
+          try {
+            final cachedInputFile = File(cachedInputPath);
+            if (await cachedInputFile.exists()) {
+              await cachedInputFile.delete();
+            }
+          } catch (_) {
+            // Ignore per-file input cache cleanup failure.
+          }
+          await batchController.disposeProject();
+          batchController.dispose();
+        }
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _batchProgress = 1;
+        _batchStatus = l10n.batchCompleted(
+          successCount,
+          failures.length,
+        );
+      });
+
+      if (failures.isEmpty) {
+        _showMessage(l10n.batchCompleted(successCount, 0));
+      } else {
+        _showMessage(
+          l10n.batchPartialFailureSummary(
+            successCount,
+            failures.length,
+            failures.take(5).join('\n'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showMessage(l10n.batchFailedWithDetails(error.toString()));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBatchCropping = false;
+        });
+      }
+      await _clearExportCacheSilently();
+    }
+  }
+
+  Future<bool?> _showBatchDirectoryPrompt({
+    required String title,
+    required String description,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final l10n = context.l10n;
+        return AlertDialog(
+          title: Text(title),
+          content: Text(description),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(l10n.continueToSelectFolder),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _handleDropFiles(List<dynamic> files) async {

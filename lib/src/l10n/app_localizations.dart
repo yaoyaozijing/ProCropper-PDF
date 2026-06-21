@@ -31,9 +31,9 @@ class AppLocalizations {
   String get processingTask => isZh ? '正在处理任务...' : 'Processing task...';
   String get cropPdf => isZh ? '裁切 PDF' : 'Crop PDF';
   String get batchCrop => isZh ? '批量裁边' : 'Batch Crop';
-  String get batchCropDesktopOnly => isZh
-      ? '批量裁边目前仅支持桌面端。'
-      : 'Batch crop is currently available on desktop only.';
+  String get batchCropUnsupported => isZh
+      ? '当前平台暂不支持批量裁边。'
+      : 'Batch crop is not supported on this platform.';
   String get batchCropRecursive => isZh
       ? '支持递归子目录，并保持目录结构导出'
       : 'Include subfolders and preserve folder structure on export';
@@ -49,9 +49,24 @@ class AppLocalizations {
   String get selectBatchInputDirectory => isZh
       ? '选择待处理目录'
       : 'Select Input Folder';
+  String get batchInputDirectoryPromptTitle => isZh
+      ? '选择待处理目录'
+      : 'Choose Input Folder';
+  String get batchInputDirectoryPromptDescription => isZh
+      ? '请选择包含待裁切 PDF 的文件夹。应用会按当前默认分组方式自动计算裁边并批量处理其中的 PDF。'
+      : 'Choose the folder that contains the PDFs you want to crop. The app will use the current default grouping mode and process the PDFs in that folder.';
   String get selectBatchOutputDirectory => isZh
       ? '选择导出目录'
       : 'Select Output Folder';
+  String get batchOutputDirectoryPromptTitle => isZh
+      ? '选择导出目录'
+      : 'Choose Output Folder';
+  String get batchOutputDirectoryPromptDescription => isZh
+      ? '请选择用于保存裁切结果的文件夹。导出的 PDF 会写入这个目录，并在启用递归时保持原有子目录结构。'
+      : 'Choose the folder where cropped PDFs should be saved. Exported PDFs will be written there, and subfolder structure will be preserved when recursive mode is enabled.';
+  String get continueToSelectFolder => isZh
+      ? '继续选择'
+      : 'Continue';
   String get batching => isZh ? '批量处理中' : 'Batch Processing';
   String get batchPreparing => isZh
       ? '正在准备批量裁边任务...'
@@ -62,6 +77,9 @@ class AppLocalizations {
   String batchNoPdfFound(String path) => isZh
       ? '所选目录中没有 PDF 文件：$path'
       : 'No PDF files were found in: $path';
+  String get batchFailedToReadSourceFile => isZh
+      ? '读取源文件失败'
+      : 'Failed to read source file';
   String batchProcessingFile(
     int current,
     int total,
