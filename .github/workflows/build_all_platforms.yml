@@ -2,6 +2,16 @@ name: Build All Platforms
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a GitHub Release after this manual run
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: Optional release tag for manual publish, for example v0.2.1-beta.1
+        required: false
+        type: string
   push:
     tags:
       - 'v*'
@@ -63,7 +73,7 @@ jobs:
           mv app-x86_64-release.apk "${APP_SLUG}-${BUILD_SUFFIX}-android-x86_64.apk"
 
       - name: Upload Android Artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: android-artifacts
           path: |
@@ -125,7 +135,7 @@ jobs:
           tar -czf "${APP_SLUG}-${BUILD_SUFFIX}-linux-x64.tar.gz" bundle
 
       - name: Upload Linux Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: linux-artifacts
           path: build/linux/x64/release/${{ env.APP_SLUG }}-*.tar.gz
@@ -190,7 +200,7 @@ jobs:
             -Force
 
       - name: Upload Windows Artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: windows-artifacts
           path: |
@@ -265,7 +275,7 @@ jobs:
             "${APP_SLUG}-${BUILD_SUFFIX}-macos.dmg"
 
       - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: macos-artifacts
           path: |
@@ -315,7 +325,7 @@ jobs:
           zip -r "${APP_SLUG}-${BUILD_SUFFIX}-ios-unsigned.ipa" Payload
 
       - name: Upload iOS Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: ios-artifacts
           path: build/ios/ipa/${{ env.APP_SLUG }}-*.ipa
@@ -323,7 +333,7 @@ jobs:
 
   release:
     name: Publish Release Assets
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true')
     needs:
       - android
       - linux
@@ -333,14 +343,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve Release Metadata
+        shell: bash
+        run: |
+          VERSION="$(grep '^version:' pubspec.yaml | head -n1 | awk '{print $2}')"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+            PRERELEASE="false"
+          else
+            INPUT_TAG="${{ github.event.inputs.release_tag }}"
+            if [[ -n "$INPUT_TAG" ]]; then
+              RELEASE_TAG="$INPUT_TAG"
+            else
+              RELEASE_TAG="v${VERSION}-manual-${SHORT_SHA}"
+            fi
+            PRERELEASE="true"
+          fi
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "PRERELEASE=${PRERELEASE}" >> "$GITHUB_ENV"
+
       - name: Download All Artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          prerelease: ${{ env.PRERELEASE }}
+          target_commitish: ${{ github.sha }}
           files: |
             release-artifacts/**/*.apk
             release-artifacts/**/*.ipa
