@@ -1,4 +1,8 @@
  [中文](README.md) | [English](README.en.md) | [日本語](README.ja.md)
+ 
+ <a href="https://apps.microsoft.com/detail/9mtsvmhn3p7z?referrer=appbadge&mode=full" target="_blank"  rel="noopener noreferrer">
+	<img src="https://get.microsoft.com/images/zh-cn%20light.svg" width="200"/>
+</a>
 
 # ProCropper PDF
 
