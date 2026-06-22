@@ -88,6 +88,7 @@ class AppSettingsService {
     final batchCropRecursive = raw['batchCropRecursive'] as bool?;
     final useOriginalFileNameForExport =
         raw['useOriginalFileNameForExport'] as bool?;
+    final allowCropOutsidePage = raw['allowCropOutsidePage'] as bool?;
     return AppGroupingSettings(
       defaultSmartGroupingLevel: smartGroupingLevelIndex != null &&
               smartGroupingLevelIndex >= 0 &&
@@ -97,6 +98,7 @@ class AppSettingsService {
       defaultSeparateOddEven: defaultSeparateOddEven ?? true,
       batchCropRecursive: batchCropRecursive ?? false,
       useOriginalFileNameForExport: useOriginalFileNameForExport ?? false,
+      allowCropOutsidePage: allowCropOutsidePage ?? false,
     );
   }
 
@@ -106,6 +108,7 @@ class AppSettingsService {
       'defaultSeparateOddEven': settings.defaultSeparateOddEven,
       'batchCropRecursive': settings.batchCropRecursive,
       'useOriginalFileNameForExport': settings.useOriginalFileNameForExport,
+      'allowCropOutsidePage': settings.allowCropOutsidePage,
     });
   }
 }

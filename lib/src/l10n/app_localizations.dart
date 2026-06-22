@@ -218,6 +218,7 @@ class AppLocalizations {
   String get removeCurrentRect => isZh ? '移除当前框' : (isJa ? '現在の枠を削除' : 'Remove Current Box');
   String get splitHorizontal => isZh ? '水平拆分' : (isJa ? '横方向に分割' : 'Split Horizontally');
   String get splitVertical => isZh ? '垂直拆分' : (isJa ? '縦方向に分割' : 'Split Vertically');
+  String get expandToFullPage => isZh ? '扩展到全页面' : (isJa ? 'ページ全体に広げる' : 'Expand to Full Page');
   String get copyPreset => isZh ? '复制方案' : (isJa ? 'プリセットをコピー' : 'Copy Preset');
   String get pastePreset => isZh ? '粘贴方案' : (isJa ? 'プリセットを貼り付け' : 'Paste Preset');
   String get applyToAll => isZh ? '应用到全部' : (isJa ? 'すべてに適用' : 'Apply to All');
@@ -377,10 +378,10 @@ class AppLocalizations {
   String get restore => isZh ? '还原' : (isJa ? '元に戻す' : 'Restore');
   String get darkMode => isZh ? '深色' : (isJa ? 'ダーク' : 'Dark');
   String get lightMode => isZh ? '浅色' : (isJa ? 'ライト' : 'Light');
-  String get systemMode => isZh ? '自动' : (isJa ? 'システムに従う' : 'Follow System');
+  String get systemMode => isZh ? '跟随系统' : (isJa ? 'システムに従う' : 'Follow System');
   String get language => isZh ? '语言' : (isJa ? '言語' : 'Language');
   String get simplifiedChinese => isZh ? '简体中文' : (isJa ? '簡体字中国語' : 'Simplified Chinese');
-  String get english => isZh ? 'English' : (isJa ? '英語' : 'English');
+  String get english => isZh ? '英语' : (isJa ? '英語' : 'English');
   String get japanese => isZh ? '日语' : (isJa ? '日本語' : 'Japanese');
   String get languageSettingsDescription => isZh
       ? '默认跟随系统，也可以在应用内固定为中文或英文。'
@@ -443,6 +444,14 @@ class AppLocalizations {
   String get defaultSeparateOddEvenForNewPdfDescription => isZh
       ? '新打开 PDF 或批量裁边时，默认按奇偶页拆分分组。'
       : (isJa ? '新しく開く PDF や一括トリミングでは、既定で奇数ページと偶数ページを別グループにします。' : 'New PDFs and batch crop tasks separate odd and even pages by default.');
+  String get allowCropOutsidePage => isZh
+      ? '允许裁切框超出页面'
+      : (isJa ? 'トリミング枠をページ外へ出せるようにする' : 'Allow Crop Boxes Outside Page');
+  String get allowCropOutsidePageDescription => isZh
+      ? '开启后可将裁切框拖出页面范围，并允许缩小到页面周围出现留白。'
+      : (isJa
+          ? '有効にすると、トリミング枠をページ外までドラッグでき、ページ周囲に余白が見えるまで縮小できます。'
+          : 'When enabled, crop boxes can be dragged outside the page and the view can zoom out enough to leave margins around the page.');
   String get defaultExportMode =>
       isZh ? '默认导出方式' : (isJa ? '既定の書き出し方法' : 'Default Export Mode');
   String get defaultExportModeDescription => isZh

@@ -126,6 +126,20 @@ class PdfEditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void createRect(CropRect rect) {
+    final cluster = selectedCluster;
+    if (cluster == null) {
+      return;
+    }
+    final updatedRects = [...cluster.cropRects, rect.normalized()];
+    final updatedLocks = [...cluster.aspectRatioLocks, null];
+    _replaceCluster(
+      cluster.copyWith(cropRects: updatedRects, aspectRatioLocks: updatedLocks),
+    );
+    _selectedRectIndex = updatedRects.length - 1;
+    notifyListeners();
+  }
+
   void removeSelectedRect() {
     final cluster = selectedCluster;
     if (cluster == null || cluster.cropRects.length <= 1) {
@@ -190,6 +204,16 @@ class PdfEditorController extends ChangeNotifier {
       cluster.copyWith(cropRects: updatedRects, aspectRatioLocks: updatedLocks),
     );
     notifyListeners();
+  }
+
+  void expandSelectedRectToFullPage() {
+    final cluster = selectedCluster;
+    if (cluster == null || cluster.cropRects.isEmpty) {
+      return;
+    }
+    final updatedRects = [...cluster.cropRects];
+    updatedRects[_selectedRectIndex] = CropRect.full;
+    _replaceCluster(cluster.copyWith(cropRects: updatedRects));
   }
 
   void copyCurrentRects() {

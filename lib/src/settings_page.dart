@@ -291,6 +291,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     ? _updateUseOriginalFileNameForExport
                     : null,
               ),
+              SettingsTile.switchTile(
+                initialValue: _groupingSettings.allowCropOutsidePage,
+                leading: const Icon(Icons.crop_free_outlined),
+                title: Text(l10n.allowCropOutsidePage),
+                description: Text(l10n.allowCropOutsidePageDescription),
+                onToggle: _groupingSettingsLoaded
+                    ? _updateAllowCropOutsidePage
+                    : null,
+              ),
               SettingsTile.navigation(
                 leading: _clearingCache
                     ? const SizedBox(
@@ -405,6 +414,19 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     final nextSettings = _groupingSettings.copyWith(
       useOriginalFileNameForExport: value,
+    );
+    setState(() {
+      _groupingSettings = nextSettings;
+    });
+    await _appSettingsService.saveGroupingSettings(nextSettings);
+  }
+
+  Future<void> _updateAllowCropOutsidePage(bool value) async {
+    if (_groupingSettings.allowCropOutsidePage == value) {
+      return;
+    }
+    final nextSettings = _groupingSettings.copyWith(
+      allowCropOutsidePage: value,
     );
     setState(() {
       _groupingSettings = nextSettings;

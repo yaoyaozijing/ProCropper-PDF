@@ -55,8 +55,10 @@ class CropEditor extends StatefulWidget {
     required this.aspectRatioLocks,
     required this.selectedRectIndex,
     required this.colorScheme,
+    required this.allowCropOutsidePage,
     required this.onRectSelected,
     required this.onRectChanged,
+    required this.onRectCreated,
     required this.onRectDeleteRequested,
     required this.onRectInfoRequested,
     this.contentPadding = EdgeInsets.zero,
@@ -70,8 +72,10 @@ class CropEditor extends StatefulWidget {
   final List<CropAspectRatioLock?> aspectRatioLocks;
   final int selectedRectIndex;
   final ColorScheme colorScheme;
+  final bool allowCropOutsidePage;
   final ValueChanged<int> onRectSelected;
   final ValueChanged<CropRect> onRectChanged;
+  final ValueChanged<CropRect> onRectCreated;
   final ValueChanged<int> onRectDeleteRequested;
   final ValueChanged<int> onRectInfoRequested;
   final EdgeInsets contentPadding;
@@ -82,7 +86,6 @@ class CropEditor extends StatefulWidget {
 }
 
 class _CropEditorState extends State<CropEditor> {
-  static const double _minZoom = 0.35;
   static const double _maxZoom = 6;
   static const double _zoomStep = 1.15;
   static const double _mouseHandleRadius = 16;
@@ -108,6 +111,7 @@ class _CropEditorState extends State<CropEditor> {
   Offset _gestureAnchor = const Offset(0.5, 0.5);
   PointerDeviceKind _lastPointerKind = PointerDeviceKind.mouse;
   MouseCursor _mouseCursor = SystemMouseCursors.basic;
+  bool _secondaryDragActive = false;
 
   @override
   void initState() {
@@ -129,7 +133,8 @@ class _CropEditorState extends State<CropEditor> {
       );
     }
     if (oldWidget.previewBytes != widget.previewBytes ||
-        oldWidget.previewSize != widget.previewSize) {
+        oldWidget.previewSize != widget.previewSize ||
+        oldWidget.allowCropOutsidePage != widget.allowCropOutsidePage) {
       _baseFittedSize = null;
       _effectiveContentPadding = null;
       _zoom = 1;
@@ -158,6 +163,28 @@ class _CropEditorState extends State<CropEditor> {
         return Listener(
           onPointerDown: (event) {
             _lastPointerKind = event.kind;
+            if (event.kind == PointerDeviceKind.mouse &&
+                event.buttons == kSecondaryMouseButton) {
+              _secondaryDragActive = false;
+              _startSecondaryCropDrag(event.localPosition);
+            }
+          },
+          onPointerMove: (event) {
+            if (_secondaryDragActive &&
+                event.kind == PointerDeviceKind.mouse &&
+                event.buttons == kSecondaryMouseButton) {
+              _updateCropRect(event.localPosition);
+            }
+          },
+          onPointerUp: (event) {
+            if (event.kind == PointerDeviceKind.mouse) {
+              _endSecondaryCropDrag();
+            }
+          },
+          onPointerCancel: (event) {
+            if (event.kind == PointerDeviceKind.mouse) {
+              _endSecondaryCropDrag();
+            }
           },
           onPointerSignal: _onPointerSignal,
           child: MouseRegion(
@@ -177,7 +204,6 @@ class _CropEditorState extends State<CropEditor> {
               onScaleEnd: _onScaleEnd,
               onTapUp: _onTapUp,
               onDoubleTapDown: _onDoubleTapDown,
-              onSecondaryTapUp: _onSecondaryTapUp,
               child: ClipRect(
                 child: Stack(
                   children: [
@@ -240,19 +266,6 @@ class _CropEditorState extends State<CropEditor> {
     }
   }
 
-  void _onSecondaryTapUp(TapUpDetails details) {
-    final position = details.localPosition;
-    final imageRect = _imageRectFor(_viewportSize);
-    for (var i = widget.cropRects.length - 1; i >= 0; i--) {
-      final rect = _rectOnViewport(widget.cropRects[i], imageRect);
-      if (rect.contains(position)) {
-        widget.onRectSelected(i);
-        widget.onRectInfoRequested(i);
-        return;
-      }
-    }
-  }
-
   void _onDoubleTapDown(TapDownDetails details) {
     if (details.kind != PointerDeviceKind.mouse) {
       return;
@@ -268,9 +281,55 @@ class _CropEditorState extends State<CropEditor> {
         return;
       }
     }
+
+    if (imageRect.contains(position)) {
+      widget.onRectCreated(_defaultRectAround(position, imageRect));
+    }
+  }
+
+  void _endSecondaryCropDrag() {
+    if (_secondaryDragActive) {
+      _secondaryDragActive = false;
+      _interactionMode = _InteractionMode.none;
+      _dragHandle = null;
+      _dragStart = null;
+      _dragStartRect = null;
+    }
+  }
+
+  void _startSecondaryCropDrag(Offset localPosition) {
+    if (_viewportSize.isEmpty || widget.cropRects.isEmpty) {
+      return;
+    }
+    final imageRect = _imageRectFor(_viewportSize);
+
+    for (var i = widget.cropRects.length - 1; i >= 0; i--) {
+      final rect = _rectOnViewport(widget.cropRects[i], imageRect);
+      if (!rect.contains(localPosition)) {
+        continue;
+      }
+
+      final handle = _resolveHandle(localPosition, rect, PointerDeviceKind.mouse);
+      if (handle == null) {
+        continue;
+      }
+
+      widget.onRectSelected(i);
+      _interactionMode = _InteractionMode.editCrop;
+      _dragHandle = handle == _DragHandle.move
+          ? _closestBoundaryHandle(localPosition, rect)
+          : handle;
+      _dragStart = localPosition;
+      _dragStartRect = widget.cropRects[i];
+      _secondaryDragActive = true;
+      return;
+    }
   }
 
   void _onScaleStart(ScaleStartDetails details) {
+    if (_secondaryDragActive) {
+      return;
+    }
     if (_viewportSize.isEmpty) {
       return;
     }
@@ -322,6 +381,9 @@ class _CropEditorState extends State<CropEditor> {
   }
 
   void _onScaleUpdate(ScaleUpdateDetails details) {
+    if (_secondaryDragActive) {
+      return;
+    }
     if (_interactionMode == _InteractionMode.editCrop &&
         (details.scale - 1).abs() > 0.02) {
       _interactionMode = _InteractionMode.transformViewport;
@@ -344,7 +406,7 @@ class _CropEditorState extends State<CropEditor> {
     }
 
     final nextZoom = (_gestureStartZoom * details.scale)
-        .clamp(_minZoom, _maxZoom)
+        .clamp(_minZoomFor(_contentRectFor(_viewportSize).size), _maxZoom)
         .toDouble();
     final contentRect = _contentRectFor(_viewportSize);
     final nextSize = _displaySizeFor(contentRect.size, nextZoom);
@@ -368,6 +430,9 @@ class _CropEditorState extends State<CropEditor> {
   }
 
   void _onScaleEnd(ScaleEndDetails details) {
+    if (_secondaryDragActive) {
+      return;
+    }
     _interactionMode = _InteractionMode.none;
     _dragHandle = null;
     _dragStart = null;
@@ -448,6 +513,14 @@ class _CropEditorState extends State<CropEditor> {
       aspectRatioLock: aspectRatioLock,
     );
 
+    if (!widget.allowCropOutsidePage) {
+      rect = _clampRectInsidePageForHandle(
+        rect,
+        handle: _dragHandle!,
+        originalRect: _dragStartRect!,
+      );
+    }
+
     if (rect.isValid) {
       widget.onRectChanged(rect.normalized());
     }
@@ -521,7 +594,9 @@ class _CropEditorState extends State<CropEditor> {
       return;
     }
 
-    final nextZoom = (_zoom * factor).clamp(_minZoom, _maxZoom).toDouble();
+    final nextZoom = (_zoom * factor)
+        .clamp(_minZoomFor(_contentRectFor(_viewportSize).size), _maxZoom)
+        .toDouble();
     final anchor = _normalizedAnchor(focalPoint, currentRect);
     final contentRect = _contentRectFor(_viewportSize);
     final nextSize = _displaySizeFor(contentRect.size, nextZoom);
@@ -590,6 +665,20 @@ class _CropEditorState extends State<CropEditor> {
     Size displaySize,
     Offset baseTopLeft,
   ) {
+    if (!widget.allowCropOutsidePage) {
+      final minLeft = math.max(boundsRect.left, boundsRect.right - displaySize.width);
+      final maxLeft = math.min(boundsRect.left, boundsRect.right - displaySize.width);
+      final minTop = math.max(boundsRect.top, boundsRect.bottom - displaySize.height);
+      final maxTop = math.min(boundsRect.top, boundsRect.bottom - displaySize.height);
+      final clampedLeft = (baseTopLeft.dx + pan.dx)
+          .clamp(math.min(minLeft, maxLeft), math.max(minLeft, maxLeft))
+          .toDouble();
+      final clampedTop = (baseTopLeft.dy + pan.dy)
+          .clamp(math.min(minTop, maxTop), math.max(minTop, maxTop))
+          .toDouble();
+      return Offset(clampedLeft - baseTopLeft.dx, clampedTop - baseTopLeft.dy);
+    }
+
     final minLeft = math.min(boundsRect.left, boundsRect.right - displaySize.width);
     final maxLeft = math.max(boundsRect.left, boundsRect.right - displaySize.width);
     final minTop = math.min(boundsRect.top, boundsRect.bottom - displaySize.height);
@@ -710,6 +799,129 @@ class _CropEditorState extends State<CropEditor> {
       _DragHandle.topRight || _DragHandle.bottomLeft =>
         SystemMouseCursors.resizeUpRightDownLeft,
     };
+  }
+
+  double _minZoomFor(Size availableSize) {
+    if (widget.allowCropOutsidePage) {
+      return 0.35;
+    }
+    final fitted = _baseFittedSize ?? _fitSize(availableSize, widget.previewSize);
+    if (fitted.width <= 0 ||
+        fitted.height <= 0 ||
+        availableSize.width <= 0 ||
+        availableSize.height <= 0) {
+      return 1.0;
+    }
+    final widthFit = availableSize.width / fitted.width;
+    final heightFit = availableSize.height / fitted.height;
+    return math.min(widthFit, heightFit).clamp(1.0, _maxZoom).toDouble();
+  }
+
+  CropRect _clampRectInsidePageForHandle(
+    CropRect rect, {
+    required _DragHandle handle,
+    required CropRect originalRect,
+  }) {
+    const minSize = 0.005;
+    final normalized = rect.normalized();
+
+    switch (handle) {
+      case _DragHandle.move:
+        final width = normalized.width;
+        final height = normalized.height;
+        final left = normalized.left.clamp(0.0, 1.0 - width).toDouble();
+        final top = normalized.top.clamp(0.0, 1.0 - height).toDouble();
+        return CropRect(
+          left: left,
+          top: top,
+          right: left + width,
+          bottom: top + height,
+        );
+      case _DragHandle.left:
+        return CropRect(
+          left: normalized.left.clamp(0.0, normalized.right - minSize).toDouble(),
+          top: normalized.top.clamp(0.0, 1.0).toDouble(),
+          right: normalized.right.clamp(minSize, 1.0).toDouble(),
+          bottom: normalized.bottom.clamp(minSize, 1.0).toDouble(),
+        );
+      case _DragHandle.right:
+        return CropRect(
+          left: normalized.left.clamp(0.0, 1.0 - minSize).toDouble(),
+          top: normalized.top.clamp(0.0, 1.0).toDouble(),
+          right: normalized.right.clamp(normalized.left + minSize, 1.0).toDouble(),
+          bottom: normalized.bottom.clamp(minSize, 1.0).toDouble(),
+        );
+      case _DragHandle.top:
+        return CropRect(
+          left: normalized.left.clamp(0.0, 1.0).toDouble(),
+          top: normalized.top.clamp(0.0, normalized.bottom - minSize).toDouble(),
+          right: normalized.right.clamp(minSize, 1.0).toDouble(),
+          bottom: normalized.bottom.clamp(minSize, 1.0).toDouble(),
+        );
+      case _DragHandle.bottom:
+        return CropRect(
+          left: normalized.left.clamp(0.0, 1.0).toDouble(),
+          top: normalized.top.clamp(0.0, 1.0 - minSize).toDouble(),
+          right: normalized.right.clamp(minSize, 1.0).toDouble(),
+          bottom: normalized.bottom.clamp(normalized.top + minSize, 1.0).toDouble(),
+        );
+      case _DragHandle.topLeft:
+        return CropRect(
+          left: normalized.left.clamp(0.0, normalized.right - minSize).toDouble(),
+          top: normalized.top.clamp(0.0, normalized.bottom - minSize).toDouble(),
+          right: normalized.right.clamp(minSize, 1.0).toDouble(),
+          bottom: normalized.bottom.clamp(minSize, 1.0).toDouble(),
+        );
+      case _DragHandle.topRight:
+        return CropRect(
+          left: normalized.left.clamp(0.0, 1.0 - minSize).toDouble(),
+          top: normalized.top.clamp(0.0, normalized.bottom - minSize).toDouble(),
+          right: normalized.right.clamp(normalized.left + minSize, 1.0).toDouble(),
+          bottom: normalized.bottom.clamp(minSize, 1.0).toDouble(),
+        );
+      case _DragHandle.bottomLeft:
+        return CropRect(
+          left: normalized.left.clamp(0.0, normalized.right - minSize).toDouble(),
+          top: normalized.top.clamp(0.0, 1.0 - minSize).toDouble(),
+          right: normalized.right.clamp(minSize, 1.0).toDouble(),
+          bottom: normalized.bottom.clamp(normalized.top + minSize, 1.0).toDouble(),
+        );
+      case _DragHandle.bottomRight:
+        return CropRect(
+          left: normalized.left.clamp(0.0, 1.0 - minSize).toDouble(),
+          top: normalized.top.clamp(0.0, 1.0 - minSize).toDouble(),
+          right: normalized.right.clamp(normalized.left + minSize, 1.0).toDouble(),
+          bottom: normalized.bottom.clamp(normalized.top + minSize, 1.0).toDouble(),
+        );
+    }
+  }
+
+  CropRect _defaultRectAround(Offset position, Rect imageRect) {
+    const halfWidth = 0.18;
+    const halfHeight = 0.18;
+    final normalized = _normalizedAnchor(position, imageRect);
+    return CropRect(
+      left: (normalized.dx - halfWidth).clamp(0.0, 1.0).toDouble(),
+      top: (normalized.dy - halfHeight).clamp(0.0, 1.0).toDouble(),
+      right: (normalized.dx + halfWidth).clamp(0.0, 1.0).toDouble(),
+      bottom: (normalized.dy + halfHeight).clamp(0.0, 1.0).toDouble(),
+    ).normalized();
+  }
+
+  _DragHandle _closestBoundaryHandle(Offset point, Rect rect) {
+    final distances = <_DragHandle, double>{
+      _DragHandle.topLeft: (point - rect.topLeft).distance,
+      _DragHandle.topRight: (point - rect.topRight).distance,
+      _DragHandle.bottomLeft: (point - rect.bottomLeft).distance,
+      _DragHandle.bottomRight: (point - rect.bottomRight).distance,
+      _DragHandle.top: (point.dy - rect.top).abs(),
+      _DragHandle.right: (point.dx - rect.right).abs(),
+      _DragHandle.bottom: (point.dy - rect.bottom).abs(),
+      _DragHandle.left: (point.dx - rect.left).abs(),
+    };
+    final sorted = distances.entries.toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    return sorted.first.key;
   }
 
   Size _fitSize(Size bounds, Size source) {

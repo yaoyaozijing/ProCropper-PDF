@@ -11,6 +11,7 @@ import 'l10n/app_localizations.dart';
 import 'models/app_grouping_settings.dart';
 import 'models/cluster_settings.dart';
 import 'models/crop_aspect_ratio_lock.dart';
+import 'models/crop_rect.dart';
 import 'models/page_cluster.dart';
 import 'pdf_crop_preview_page.dart';
 import 'services/app_settings_service.dart';
@@ -200,8 +201,10 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
             aspectRatioLocks: cluster.aspectRatioLocks,
             selectedRectIndex: _controller.selectedRectIndex,
             colorScheme: colorScheme,
+            allowCropOutsidePage: _groupingSettings.allowCropOutsidePage,
             onRectSelected: _controller.selectRect,
             onRectChanged: _controller.updateSelectedRect,
+            onRectCreated: _createRectFromCropEditor,
             onRectDeleteRequested: _removeRectByIndex,
             onRectInfoRequested: _showRectInfoDialog,
             contentPadding: EdgeInsets.fromLTRB(
@@ -317,6 +320,10 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         PopupMenuItem(
           value: _CompactToolbarAction.splitHorizontal,
           child: Text(l10n.splitVertical),
+        ),
+        PopupMenuItem(
+          value: _CompactToolbarAction.expandFullPage,
+          child: Text(l10n.expandToFullPage),
         ),
         const PopupMenuDivider(),
         PopupMenuItem(
@@ -573,6 +580,12 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
                 icon: Icons.view_agenda_outlined,
                 label: l10n.splitVertical,
               ),
+              const SizedBox(height: 10),
+              _buildToolbarButton(
+                onPressed: _controller.expandSelectedRectToFullPage,
+                icon: Icons.crop_free_rounded,
+                label: l10n.expandToFullPage,
+              ),
               const SizedBox(height: 14),
               Divider(color: Theme.of(context).colorScheme.outlineVariant),
               const SizedBox(height: 14),
@@ -677,6 +690,8 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
         _controller.splitSelectedRectVertically();
       case _CompactToolbarAction.splitHorizontal:
         _controller.splitSelectedRectHorizontally();
+      case _CompactToolbarAction.expandFullPage:
+        _controller.expandSelectedRectToFullPage();
       case _CompactToolbarAction.copyRects:
         _controller.copyCurrentRects();
       case _CompactToolbarAction.pasteRects:
@@ -1535,6 +1550,10 @@ class _PdfEditorPageState extends State<PdfEditorPage> {
     _controller.removeSelectedRect();
   }
 
+  void _createRectFromCropEditor(CropRect rect) {
+    _controller.createRect(rect);
+  }
+
   Set<int> _parsePageSelection(String text) {
     final result = <int>{};
     for (final rawPart in text.split(',')) {
@@ -1830,6 +1849,7 @@ enum _CompactToolbarAction {
   removeRect,
   splitVertical,
   splitHorizontal,
+  expandFullPage,
   copyRects,
   pasteRects,
   applyAll,
